@@ -1,1 +1,191 @@
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#35101f,#09070c 48%);color:#fff;font-family:system-ui,sans-serif}.app{max-width:520px;margin:auto;padding:18px 16px 40px}header,.row{display:flex;justify-content:space-between;align-items:center}header{font-size:19px}.tag{border:1px solid #77304a;color:#ff8cac;border-radius:30px;padding:5px 11px;font-size:11px}.hero{text-align:center;padding:24px 0 16px}.logo{font-size:60px;filter:drop-shadow(0 0 18px #ff174f)}h1{margin:3px;font-size:27px}.hero p,.card p,.card small{color:#c5b6c4;font-size:13px}.card{background:linear-gradient(145deg,#211522,#100d15);border:1px solid #54253b;border-radius:19px;padding:18px;margin:14px 0}.balance{background:linear-gradient(120deg,#a90035,#ed174f);border:0}.balance small{color:#ffe0e9}.amount{font-size:34px;font-weight:850;margin:4px 0}.amount span,.rate small{font-size:14px}.status{color:#5ef0a3;font-size:12px}.reward{font-size:27px;color:#ffcf4a;font-weight:850;margin:15px 0}.timer{width:112px;height:112px;border:5px solid #ff2867;border-radius:50%;display:grid;place-items:center;margin:14px auto;font-weight:800;box-shadow:0 0 22px #ff174f55}button{width:100%;border:0;border-radius:13px;padding:14px;background:linear-gradient(90deg,#ff174f,#c50048);color:white;font-size:15px;font-weight:800;margin-top:10px}button.secondary{background:linear-gradient(90deg,#a20c55,#f02c83)}button:disabled{opacity:.5}.notice{text-align:center;color:#ffc4d5!important;min-height:18px}footer{text-align:center;color:#a99baa;font-size:11px;padding:12px}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #0b0912;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  padding-bottom: 85px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px;
+  background: #171020;
+  border-bottom: 1px solid #30203c;
+}
+
+.brand {
+  color: #ff5b9c;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.user {
+  color: #ddd;
+  font-size: 13px;
+}
+
+.container {
+  max-width: 600px;
+  margin: auto;
+  padding: 15px;
+}
+
+.balance-card {
+  text-align: center;
+  padding: 28px 15px;
+  margin-bottom: 16px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #581c46, #21112e);
+  border: 1px solid #a83d7c;
+}
+
+.balance-card h1 {
+  color: #ff75ad;
+  font-size: 36px;
+  margin: 12px;
+}
+
+.balance-card small,
+.card small {
+  color: #b9a9c5;
+  font-size: 11px;
+}
+
+.card {
+  background: #171320;
+  border: 1px solid #30243b;
+  border-radius: 17px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.card h2 {
+  color: #ff75ad;
+  font-size: 19px;
+  margin-bottom: 15px;
+}
+
+.card p {
+  color: #c7bdce;
+  font-size: 13px;
+  margin: 10px 0;
+  line-height: 1.5;
+}
+
+.mining {
+  text-align: center;
+}
+
+.mining-circle {
+  width: 125px;
+  height: 125px;
+  border-radius: 50%;
+  border: 5px solid #ff5b9c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 55px;
+  margin: 20px auto;
+  box-shadow: 0 0 25px #a52c6b55;
+}
+
+.mining h3 {
+  color: #ff9ac2;
+  margin: 12px;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  margin-top: 12px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.primary {
+  color: white;
+  background: linear-gradient(90deg, #e83d85, #a832bd);
+}
+
+.secondary {
+  color: white;
+  background: #33233f;
+  border: 1px solid #75436e;
+}
+
+button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.task {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0;
+  border-bottom: 1px solid #30243b;
+  font-size: 13px;
+}
+
+.task:last-child {
+  border-bottom: none;
+}
+
+.task span:last-child {
+  color: #ff83b5;
+  white-space: nowrap;
+}
+
+input {
+  width: 100%;
+  padding: 13px;
+  margin-top: 10px;
+  border-radius: 9px;
+  border: 1px solid #55405f;
+  background: #0d0a13;
+  color: white;
+}
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: space-around;
+  padding: 17px 5px;
+  background: #171020;
+  border-top: 1px solid #392541;
+}
+
+.bottom-nav a {
+  color: #ff8bb9;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+@media (max-width: 380px) {
+  .brand {
+    font-size: 17px;
+  }
+
+  .balance-card h1 {
+    font-size: 30px;
+  }
+
+  .card {
+    padding: 15px;
+  }
+  }
