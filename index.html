@@ -1,5 +1,6 @@
+
 <!DOCTYPE html>
-<html lang="bn">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,212 +9,345 @@
     <title>Cherry Mining</title>
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="//libtl.com/sdk.js" data-zone="12152538" data-sdk="show_12152538"></script>
+    <script src="https://libtl.com/sdk.js"
+        data-zone="12152538"
+        data-sdk="show_12152538">
+    </script>
 
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="/style.css">
 </head>
 
 <body>
 
 <header class="topbar">
-    <b>🍒 Cherry Mining</b>
-    <span id="userName">Telegram User</span>
+    <div class="brand">🍒 Cherry Mining</div>
+    <div class="user-label" id="headerUser">Telegram User</div>
 </header>
 
 <main class="container">
 
     <!-- HOME PAGE -->
-    <div class="page active" id="homePage">
+    <section class="page active" id="homePage">
 
-        <section class="balance">
-            <p>মোট Cherry Balance</p>
-            <h1><span id="balance">0</span> 🍒</h1>
-            <small>ডেমো পয়েন্ট — নগদ অর্থ বা ক্রিপ্টো নয়</small>
-        </section>
+        <div class="balance-card">
+            <p>Total Cherry Balance</p>
+            <h1 id="balance">0 🍒</h1>
+            <div class="usd-balance">
+                USD Value: $<span id="usdBalance">0.0000</span>
+            </div>
+            <small>10,000 Cherry = $1 USD</small>
+        </div>
 
-        <section class="card center">
+        <div class="card center">
             <h2>⛏️ Mining Center</h2>
 
-            <div class="cherry">🍒</div>
+            <div class="cherry-icon">🍒</div>
 
-            <p>ডেমো রেট: 500 Cherry / দিন</p>
+            <p>Mining Rate: 500 Cherry / 24 Hours</p>
 
-            <button id="startMining" class="primary">
+            <div class="mining-info">
+                <span>Mining Status</span>
+                <strong id="miningStatus">Inactive</strong>
+            </div>
+
+            <div class="mining-info">
+                <span>Available Mining Reward</span>
+                <strong id="miningReward">0 Cherry</strong>
+            </div>
+
+            <div class="mining-info">
+                <span>Time Remaining</span>
+                <strong id="miningCountdown">--:--:--</strong>
+            </div>
+
+            <button id="startMining" class="primary-btn">
                 START MINING
             </button>
 
-            <button id="claimMining" class="secondary">
+            <button id="claimMining" class="secondary-btn" disabled>
                 CLAIM MINING
             </button>
 
-            <p id="miningStatus" class="status">
-                Mining শুরু হয়নি
-            </p>
-        </section>
+            <p id="miningMessage" class="message"></p>
+        </div>
 
-        <section class="card center">
-            <h2>🎁 Daily Check-in</h2>
+        <div class="card center">
+            <h2>🌐 Partner Website</h2>
+            <p>Visit our partner website.</p>
 
-            <p>দৈনিক ডেমো বোনাস: 100 Cherry</p>
+            <a
+                class="secondary-btn link-btn"
+                href="https://asiafilm.org/4/3d71bb1d5d9fc8e97a8e16e856416b0d"
+                target="_blank"
+                rel="noopener noreferrer">
+                VISIT PARTNER
+            </a>
 
-            <button id="dailyBonus" class="primary">
-                DAILY CHECK-IN
-            </button>
+            <small>Partner visits do not automatically generate Cherry rewards.</small>
+        </div>
 
-            <p id="dailyStatus" class="status"></p>
-        </section>
-
-        <section class="card center">
-            <h2>📺 Monetag Watch Ad</h2>
-
-            <p>
-                বিজ্ঞাপন দেখানোর সুবিধা SDK ও নেটওয়ার্কের
-                অনুমতির ওপর নির্ভর করে।
-            </p>
-
-            <button id="watchAd" class="primary">
-                WATCH AD
-            </button>
-
-            <p id="adStatus" class="status">
-                রিওয়ার্ডের জন্য সার্ভার-ভেরিফিকেশন প্রয়োজন।
-            </p>
-        </section>
-
-        <section class="card">
-            <h2>💰 Wallet (Demo)</h2>
-
-            <p>Minimum display threshold: 10,000 Cherry</p>
-
-            <p>
-                এই সংস্করণে বাস্তব উত্তোলন বা
-                ক্রিপ্টো লেনদেন নেই।
-            </p>
-
-            <button disabled class="secondary">
-                WITHDRAW — DISABLED
-            </button>
-        </section>
-
-    </div>
+    </section>
 
 
     <!-- TASKS PAGE -->
-    <div class="page" id="tasksPage">
+    <section class="page" id="tasksPage">
 
-        <section class="card">
+        <div class="card">
+            <h2>📋 Daily Tasks</h2>
 
-            <h2>📋 Available Tasks</h2>
+            <p>Complete available tasks and earn Cherry.</p>
 
-            <div class="task">
-                <span>Join Telegram Community</span>
-                <b>100 🍒</b>
+            <div id="taskList">
+                <p class="message">Loading tasks...</p>
+            </div>
+        </div>
+
+        <div class="card center">
+            <h2>🎁 Daily Check-in</h2>
+
+            <div class="reward-value">+100 🍒</div>
+
+            <p>Available once every 24 hours.</p>
+
+            <div class="countdown-box">
+                <span>Next Check-in</span>
+                <strong id="dailyCountdown">Available Now</strong>
             </div>
 
-            <div class="task">
-                <span>Read App Rules</span>
-                <b>50 🍒</b>
-            </div>
+            <button id="dailyBonus" class="primary-btn">
+                DAILY CHECK-IN
+            </button>
 
-            <div class="task">
-                <span>Complete Profile</span>
-                <b>50 🍒</b>
-            </div>
+            <p id="dailyMessage" class="message"></p>
+        </div>
 
-            <div class="task">
-                <span>Explore Cherry Mining</span>
-                <b>50 🍒</b>
-            </div>
+        <div class="card center">
+            <h2>📺 Monetag Rewarded Ads</h2>
 
-            <div class="task">
-                <span>Daily Check-in</span>
-                <b>100 🍒</b>
-            </div>
+            <p>Watch a verified rewarded advertisement.</p>
 
-            <div class="task">
-                <span>Watch Monetag Ad</span>
-                <b>Verification required</b>
-            </div>
+            <button id="watchAd" class="primary-btn">
+                WATCH AD
+            </button>
 
-            <div class="task">
-                <span>Invite a Friend</span>
-                <b>1,000 🍒</b>
-            </div>
+            <p id="adMessage" class="message">
+                Rewards are credited after server verification.
+            </p>
+        </div>
 
-            <div class="task">
-                <span>Community Updates</span>
-                <b>50 🍒</b>
-            </div>
-
-            <div class="task">
-                <span>Visit Project Page</span>
-                <b>50 🍒</b>
-            </div>
-
-            <div class="task">
-                <span>Mining Activity</span>
-                <b>50 🍒</b>
-            </div>
-
-        </section>
-
-    </div>
+    </section>
 
 
     <!-- REFERRAL PAGE -->
-    <div class="page" id="referralPage">
+    <section class="page" id="referPage">
 
-        <section class="card center">
+        <div class="card center">
+            <h2>👥 Referral Program</h2>
 
-            <h2>👥 Referral System</h2>
+            <p>Invite friends using your personal referral link.</p>
 
-            <p>আপনার Telegram Referral Link</p>
-
-            <input
-                id="referralLink"
-                type="text"
-                readonly
-                value="লোড হচ্ছে..."
-            >
-
-            <button id="copyReferral" class="secondary">
-                COPY LINK
-            </button>
-
-            <div class="referral-count">
-                <p>আপনার মোট Referral</p>
-                <h1 id="refCount">0</h1>
+            <div class="referral-stat">
+                <span>Total Referrals</span>
+                <strong id="refCount">0</strong>
             </div>
 
-        </section>
+            <div class="referral-stat">
+                <span>Referral Reward</span>
+                <strong>1,000 Cherry</strong>
+            </div>
 
-    </div>
+            <label for="referralLink">Your Referral Link</label>
+
+            <input
+                type="text"
+                id="referralLink"
+                readonly
+                placeholder="Loading referral link..."
+            >
+
+            <button id="copyReferral" class="primary-btn">
+                COPY REFERRAL LINK
+            </button>
+
+            <button id="shareReferral" class="secondary-btn">
+                SHARE WITH FRIENDS
+            </button>
+
+            <p class="message" id="referralMessage"></p>
+        </div>
+
+    </section>
+
+
+    <!-- WITHDRAW PAGE -->
+    <section class="page" id="withdrawPage">
+
+        <div class="card">
+            <h2>💰 Withdraw Cherry</h2>
+
+            <div class="withdraw-balance">
+                <span>Available Balance</span>
+                <strong id="withdrawBalance">0 Cherry</strong>
+            </div>
+
+            <div class="withdraw-balance">
+                <span>USD Equivalent</span>
+                <strong>$<span id="withdrawUSD">0.0000</span></strong>
+            </div>
+
+            <p>Exchange Rate: 10,000 Cherry = $1 USD</p>
+
+            <p>Minimum Withdrawal: 10,000 Cherry ($1)</p>
+
+            <label for="withdrawNetwork">Network</label>
+
+            <select id="withdrawNetwork">
+                <option value="BEP20">BNB Smart Chain (BEP20)</option>
+            </select>
+
+            <label for="withdrawWallet">BEP20 Wallet Address</label>
+
+            <input
+                type="text"
+                id="withdrawWallet"
+                placeholder="Enter your BNB wallet address"
+            >
+
+            <label for="withdrawAmount">Withdrawal Amount (Cherry)</label>
+
+            <input
+                type="number"
+                id="withdrawAmount"
+                min="10000"
+                step="1"
+                placeholder="Minimum 10000 Cherry"
+            >
+
+            <div class="withdraw-preview">
+                <span>Estimated USD</span>
+                <strong id="withdrawPreview">$0.0000</strong>
+            </div>
+
+            <button id="submitWithdrawal" class="primary-btn">
+                SUBMIT WITHDRAWAL
+            </button>
+
+            <p id="withdrawMessage" class="message"></p>
+        </div>
+
+        <div class="card">
+            <h2>📜 Withdrawal History</h2>
+
+            <div id="withdrawHistory">
+                <p class="message">No withdrawal history available.</p>
+            </div>
+        </div>
+
+    </section>
+
+
+    <!-- PROFILE PAGE -->
+    <section class="page" id="profilePage">
+
+        <div class="card center">
+            <h2>👤 My Profile</h2>
+
+            <div class="profile-avatar" id="profileAvatar">
+                👤
+            </div>
+
+            <h3 id="profileName">Telegram User</h3>
+
+            <p>Telegram ID: <strong id="telegramId">--</strong></p>
+
+            <div class="profile-stat">
+                <span>Total Cherry Balance</span>
+                <strong id="profileBalance">0</strong>
+            </div>
+
+            <div class="profile-stat">
+                <span>Total Referrals</span>
+                <strong id="profileReferrals">0</strong>
+            </div>
+
+            <div class="profile-stat">
+                <span>Account Status</span>
+                <strong id="verificationStatus">Unverified</strong>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>💳 Wallet Settings</h2>
+
+            <label for="profileWallet">BNB Smart Chain Wallet</label>
+
+            <input
+                type="text"
+                id="profileWallet"
+                placeholder="Enter BEP20 wallet address"
+            >
+
+            <button id="saveWallet" class="primary-btn">
+                SAVE WALLET
+            </button>
+
+            <p id="walletMessage" class="message"></p>
+        </div>
+
+        <div class="card">
+            <h2>🔐 Account Verification</h2>
+
+            <p>Verify ownership of your BNB Smart Chain wallet.</p>
+
+            <p>Verification Status:</p>
+
+            <strong id="profileVerifyStatus">Not Verified</strong>
+
+            <button id="verifyWallet" class="primary-btn">
+                VERIFY WALLET OWNERSHIP
+            </button>
+
+            <p id="verifyMessage" class="message"></p>
+        </div>
+
+    </section>
 
 </main>
 
 
-<!-- BOTTOM NAVIGATION -->
-<nav class="bottom">
+<!-- FIXED BOTTOM NAVIGATION -->
+
+<nav class="bottom-nav">
 
     <button class="nav-btn active" data-page="homePage">
         <span>🏠</span>
-        Home
+        <small>Home</small>
     </button>
 
     <button class="nav-btn" data-page="tasksPage">
         <span>📋</span>
-        Tasks
+        <small>Tasks</small>
     </button>
 
-    <button class="nav-btn" data-page="referralPage">
+    <button class="nav-btn" data-page="referPage">
         <span>👥</span>
-        Referral
+        <small>Refer</small>
+    </button>
+
+    <button class="nav-btn" data-page="withdrawPage">
+        <span>💰</span>
+        <small>Withdraw</small>
+    </button>
+
+    <button class="nav-btn" data-page="profilePage">
+        <span>👤</span>
+        <small>Profile</small>
     </button>
 
 </nav>
 
 
-<script src="./app.js"></script>
+<script src="/app.js"></script>
 
 </body>
 </html>
