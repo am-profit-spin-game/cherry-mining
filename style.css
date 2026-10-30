@@ -1,4 +1,25 @@
+
+/* =====================================
+   CHERRY MINING - MAIN STYLESHEET
+   ===================================== */
+
+:root {
+    --bg: #0d0914;
+    --card: #191321;
+    --card-light: #24172e;
+    --border: #392640;
+    --pink: #ff82b5;
+    --pink-dark: #ed438a;
+    --purple: #a63abd;
+    --text: #ffffff;
+    --muted: #c7b9ce;
+    --success: #42d69b;
+    --danger: #ff647c;
+}
+
 * {
+    margin: 0;
+    padding: 0;
     box-sizing: border-box;
 }
 
@@ -7,60 +28,98 @@ html {
 }
 
 body {
-    margin: 0;
-    background: #0d0914;
-    color: #fff;
-    font-family: Arial, sans-serif;
-    padding-bottom: 85px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Arial, Helvetica, sans-serif;
+    min-height: 100vh;
+    padding-bottom: 100px;
+    overflow-x: hidden;
 }
 
-/* TOP HEADER */
+button,
+input,
+select {
+    font-family: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+
+/* =====================================
+   HEADER
+   ===================================== */
 
 .topbar {
+    width: 100%;
+    min-height: 65px;
+    padding: 15px 18px;
+
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 17px;
+    justify-content: space-between;
+    gap: 10px;
+
     background: #191222;
-    border-bottom: 1px solid #392642;
+    border-bottom: 1px solid var(--border);
+
     position: sticky;
     top: 0;
     z-index: 100;
 }
 
-.topbar b {
+.brand {
     font-size: 20px;
-    color: #ff75ad;
+    font-weight: bold;
+    color: var(--pink);
+    white-space: nowrap;
 }
 
-.topbar span {
-    font-size: 14px;
+.user-label {
+    color: var(--muted);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-/* MAIN CONTAINER */
+
+/* =====================================
+   MAIN CONTAINER
+   ===================================== */
 
 .container {
-    max-width: 620px;
-    margin: auto;
-    padding: 15px;
+    width: 100%;
+    max-width: 650px;
+    margin: 0 auto;
+    padding: 16px;
 }
 
-/* PAGE NAVIGATION */
+
+/* =====================================
+   PAGE NAVIGATION
+   ===================================== */
 
 .page {
     display: none;
     width: 100%;
-    animation: fadeIn 0.25s ease;
 }
 
 .page.active {
     display: block;
+    animation: pageFade 0.25s ease;
 }
 
-@keyframes fadeIn {
+@keyframes pageFade {
     from {
         opacity: 0;
-        transform: translateY(5px);
+        transform: translateY(7px);
     }
 
     to {
@@ -69,221 +128,590 @@ body {
     }
 }
 
-/* BALANCE */
 
-.balance,
-.card {
-    border: 1px solid #392640;
-    border-radius: 20px;
-    background: #191321;
-    padding: 22px;
-    margin-bottom: 18px;
-}
+/* =====================================
+   BALANCE CARD
+   ===================================== */
 
-.balance {
+.balance-card {
+    width: 100%;
+    padding: 28px 18px;
+    margin-bottom: 20px;
+
     text-align: center;
+
+    border-radius: 22px;
+
     background: linear-gradient(
         135deg,
         #64244d,
+        #351b43,
         #24132f
     );
+
+    border: 1px solid #754064;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
 }
 
-.balance h1 {
+.balance-card p {
+    color: #f4d8e8;
+    font-size: 16px;
+    margin-bottom: 12px;
+}
+
+.balance-card h1 {
+    color: var(--pink);
     font-size: 36px;
-    color: #ff8cba;
-    margin: 10px;
+    margin: 12px 0;
+    word-break: break-word;
 }
 
-.balance small,
-.card p {
-    color: #c7b9ce;
-    font-size: 14px;
-    line-height: 1.6;
+.usd-balance {
+    color: #ffffff;
+    font-size: 16px;
+    margin-bottom: 10px;
 }
 
-/* CARD */
+.balance-card small {
+    color: #d3b8d0;
+    font-size: 12px;
+}
+
+
+/* =====================================
+   GENERAL CARD
+   ===================================== */
+
+.card {
+    width: 100%;
+    padding: 22px;
+    margin-bottom: 20px;
+
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 21px;
+
+    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.15);
+}
 
 .card h2 {
-    color: #ff82b5;
-    margin: 0 0 18px;
+    color: var(--pink);
     font-size: 21px;
+    margin-bottom: 17px;
+}
+
+.card p {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.7;
+    margin: 10px 0;
+}
+
+.card small {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+    margin-top: 10px;
 }
 
 .center {
     text-align: center;
 }
 
-/* CHERRY */
 
-.cherry {
-    font-size: 65px;
-    margin: 20px;
+/* =====================================
+   MINING CENTER
+   ===================================== */
+
+.cherry-icon {
+    font-size: 72px;
+    margin: 25px 0;
 }
 
-/* BUTTONS */
+.mining-info,
+.withdraw-balance,
+.profile-stat,
+.referral-stat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
 
-.primary,
-.secondary {
-    display: block;
+    padding: 14px;
+    margin: 12px 0;
+
+    background: var(--card-light);
+    border-radius: 12px;
+
+    font-size: 13px;
+}
+
+.mining-info span,
+.withdraw-balance span,
+.profile-stat span,
+.referral-stat span {
+    color: var(--muted);
+}
+
+.mining-info strong,
+.withdraw-balance strong,
+.profile-stat strong,
+.referral-stat strong {
+    color: var(--pink);
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+
+/* =====================================
+   BUTTONS
+   ===================================== */
+
+.primary-btn,
+.secondary-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
     width: 100%;
-    border: 0;
+    min-height: 54px;
+
+    padding: 14px 16px;
+    margin-top: 13px;
+
     border-radius: 13px;
-    padding: 17px;
-    margin-top: 12px;
-    font-size: 16px;
-    cursor: pointer;
+    border: none;
+
+    font-size: 15px;
     font-weight: bold;
+
+    transition: 0.2s ease;
 }
 
-.primary {
+.primary-btn {
+    color: #ffffff;
+
     background: linear-gradient(
         90deg,
-        #ed438a,
-        #a63abd
+        var(--pink-dark),
+        var(--purple)
     );
-    color: white;
 }
 
-.secondary {
+.primary-btn:hover {
+    filter: brightness(1.1);
+}
+
+.secondary-btn {
+    color: #ffffff;
     background: #35243f;
-    color: white;
     border: 1px solid #70466e;
 }
 
-button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+.secondary-btn:hover {
+    background: #48304f;
 }
 
-button:active {
+.primary-btn:active,
+.secondary-btn:active {
     transform: scale(0.98);
 }
 
-/* STATUS */
-
-.status {
-    min-height: 20px;
-    margin-top: 15px;
-    color: #c7b9ce;
+.link-btn {
+    text-decoration: none;
 }
 
-/* TASK LIST */
 
-.task {
+/* =====================================
+   TASKS
+   ===================================== */
+
+.task-item {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
+    gap: 12px;
+
     padding: 15px 0;
+
     border-bottom: 1px solid #34263d;
+}
+
+.task-item:last-child {
+    border-bottom: none;
+}
+
+.task-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.task-details h3 {
     font-size: 14px;
+    color: #ffffff;
+    margin-bottom: 6px;
 }
 
-.task:last-child {
-    border-bottom: 0;
+.task-details p {
+    font-size: 12px;
+    margin: 0;
 }
 
-.task b {
-    color: #ff8cba;
+.task-reward {
+    color: var(--pink);
+    font-size: 12px;
+    font-weight: bold;
     white-space: nowrap;
 }
 
-/* REFERRAL */
-
-input {
-    width: 100%;
-    padding: 14px;
+.task-btn {
+    min-width: 85px;
+    padding: 10px;
     border-radius: 9px;
-    border: 1px solid #67456b;
-    background: #0e0a14;
-    color: #fff;
-    font-size: 13px;
-    margin-top: 10px;
+    border: none;
+
+    background: linear-gradient(
+        90deg,
+        var(--pink-dark),
+        var(--purple)
+    );
+
+    color: white;
+    font-size: 11px;
+    font-weight: bold;
 }
 
-.referral-count {
-    margin-top: 25px;
-    padding: 20px;
-    background: #24172e;
-    border-radius: 15px;
+
+/* =====================================
+   DAILY CHECK-IN
+   ===================================== */
+
+.reward-value {
+    font-size: 30px;
+    color: var(--pink);
+    font-weight: bold;
+    margin: 20px 0;
 }
 
-.referral-count h1 {
-    color: #ff8cba;
-    font-size: 35px;
-}
-
-/* BOTTOM NAVIGATION */
-
-.bottom {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-
+.countdown-box {
     display: flex;
-    justify-content: space-around;
+    flex-direction: column;
+    gap: 10px;
+
+    background: var(--card-light);
+    padding: 17px;
+    border-radius: 12px;
+    margin: 15px 0;
+}
+
+.countdown-box span {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.countdown-box strong {
+    color: var(--pink);
+    font-size: 20px;
+}
+
+
+/* =====================================
+   REFERRAL
+   ===================================== */
+
+.referral-stat {
+    padding: 17px;
+}
+
+.card label {
+    display: block;
+    color: var(--pink);
+    font-size: 13px;
+    margin-top: 18px;
+    margin-bottom: 8px;
+}
+
+
+/* =====================================
+   INPUTS AND SELECT
+   ===================================== */
+
+.card input,
+.card select {
+    width: 100%;
+    min-height: 48px;
+
+    padding: 13px;
+
+    border-radius: 10px;
+    border: 1px solid #67456b;
+
+    outline: none;
+
+    background: #100b18;
+    color: white;
+
+    font-size: 14px;
+}
+
+.card input:focus,
+.card select:focus {
+    border-color: var(--pink);
+}
+
+.card input::placeholder {
+    color: #8f8096;
+}
+
+
+/* =====================================
+   WITHDRAWAL
+   ===================================== */
+
+.withdraw-balance {
+    padding: 16px;
+}
+
+.withdraw-preview {
+    display: flex;
+    justify-content: space-between;
     align-items: center;
 
+    padding: 15px;
+    margin-top: 15px;
+
+    background: var(--card-light);
+    border-radius: 12px;
+
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.withdraw-preview strong {
+    color: var(--pink);
+    font-size: 17px;
+}
+
+
+/* =====================================
+   PROFILE
+   ===================================== */
+
+.profile-avatar {
+    width: 90px;
+    height: 90px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    margin: 15px auto;
+
+    border-radius: 50%;
+    border: 3px solid var(--pink);
+
+    background: var(--card-light);
+    font-size: 40px;
+
+    overflow: hidden;
+}
+
+.profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+#profileName {
+    color: var(--pink);
+    margin: 12px 0;
+    overflow-wrap: anywhere;
+}
+
+
+/* =====================================
+   STATUS MESSAGES
+   ===================================== */
+
+.message {
+    min-height: 18px;
+    margin-top: 13px !important;
+    font-size: 13px !important;
+    overflow-wrap: anywhere;
+}
+
+.message.success {
+    color: var(--success);
+}
+
+.message.error {
+    color: var(--danger);
+}
+
+
+/* =====================================
+   BOTTOM NAVIGATION
+   ===================================== */
+
+.bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    width: 100%;
+    min-height: 70px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+
+    padding: 8px 3px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+
     background: #191222;
-    border-top: 1px solid #392642;
+    border-top: 1px solid var(--border);
 
-    padding: 9px 5px;
-    padding-bottom: max(9px, env(safe-area-inset-bottom));
-
-    z-index: 999;
+    z-index: 9999;
 }
 
 .nav-btn {
     flex: 1;
-    border: none;
-    background: transparent;
-    color: #bca9c2;
+    min-width: 0;
 
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 5px;
 
-    gap: 4px;
-    padding: 7px 3px;
+    padding: 7px 2px;
 
-    font-size: 13px;
+    border: none;
+    background: transparent;
+
+    color: #bca9c2;
     cursor: pointer;
+
+    transition: 0.2s ease;
 }
 
 .nav-btn span {
-    font-size: 20px;
+    font-size: 21px;
+    line-height: 1.2;
+}
+
+.nav-btn small {
+    font-size: 11px;
+    font-weight: 500;
 }
 
 .nav-btn.active {
-    color: #ff8cba;
-    font-weight: bold;
+    color: var(--pink);
 }
 
-/* MOBILE RESPONSIVE */
+.nav-btn.active span {
+    transform: translateY(-2px);
+}
 
-@media (max-width: 380px) {
 
-    .balance h1 {
-        font-size: 29px;
+/* =====================================
+   MOBILE RESPONSIVE
+   ===================================== */
+
+@media (max-width: 480px) {
+
+    .container {
+        padding: 13px;
     }
 
-    .topbar b {
-        font-size: 17px;
+    .topbar {
+        padding: 15px;
     }
 
-    .topbar span {
-        font-size: 12px;
+    .brand {
+        font-size: 18px;
+    }
+
+    .balance-card {
+        padding: 25px 15px;
+    }
+
+    .balance-card h1 {
+        font-size: 31px;
     }
 
     .card {
-        padding: 18px;
+        padding: 19px;
     }
 
-    .task {
-        font-size: 12px;
+    .card h2 {
+        font-size: 19px;
+    }
+
+    .nav-btn span {
+        font-size: 20px;
+    }
+
+    .nav-btn small {
+        font-size: 10px;
+    }
+
+    .task-item {
+        gap: 7px;
+    }
+
+    .task-details h3 {
+        font-size: 13px;
+    }
+
+    .task-btn {
+        min-width: 75px;
+        font-size: 10px;
     }
 
 }
+
+
+/* =====================================
+   SMALL SCREEN
+   ===================================== */
+
+@media (max-width: 350px) {
+
+    .brand {
+        font-size: 16px;
+    }
+
+    .user-label {
+        font-size: 11px;
+    }
+
+    .nav-btn small {
+        font-size: 9px;
+    }
+
+    .nav-btn span {
+        font-size: 18px;
+    }
+
+    .mining-info,
+    .withdraw-balance {
+        font-size: 11px;
+    }
+
+}
+
+
+/* =====================================
+   ACCESSIBILITY
+   ===================================== */
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--pink);
+    outline-offset: 3px;
+}
+
