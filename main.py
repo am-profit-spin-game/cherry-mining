@@ -5,17 +5,24 @@ import hmac
 import hashlib
 import secrets
 import string
+import urllib.parse
+import urllib.request
+import urllib.error
+
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_DOWN
 from urllib.parse import parse_qsl
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, Header, HTTPException, Request
+
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
@@ -38,15 +45,20 @@ ADMIN_TELEGRAM_IDS = {
     if x.strip()
 }
 
-MINING_REWARD = int(os.getenv("MINING_REWARD", "500"))
-REFERRAL_REWARD = int(os.getenv("REFERRAL_REWARD", "100"))
-TASK_REWARD = int(os.getenv("TASK_REWARD", "50"))
+MINING_REWARD = Decimal(os.getenv("MINING_REWARD", "500"))
+REFERRAL_REWARD = Decimal(os.getenv("REFERRAL_REWARD", "100"))
+TASK_REWARD = Decimal(os.getenv("TASK_REWARD", "50"))
 
-MIN_WITHDRAW = 10000
-CHERRY_PER_USD = 10000
-DAILY_REWARD = 100
+MIN_WITHDRAW = Decimal("10000")
+CHERRY_PER_USD = Decimal("10000")
+DAILY_REWARD = Decimal("100")
+
 MINING_HOURS = 24
+REFERRAL_TASK_LIMIT = 10
+REFERRAL_DEADLINE_HOURS = 24
 
+OFFICIAL_CHANNEL = "@CherryMiningChannel"
+OFFICIAL_CHANNEL_LINK = "https://t.me/CherryMiningChannel"
 
 app = FastAPI(title="Cherry Mining API")
 
@@ -66,8 +78,8 @@ app.add_middleware(
 def db():
     if not DATABASE_URL:
         raise HTTPException(
-            status_code=500,
-            detail="DATABASE_URL is not configured"
+            500,
+            "DATABASE_URL is not configured"
         )
 
     return psycopg2.connect(
@@ -87,16 +99,42 @@ def init_db():
             telegram_id BIGINT PRIMARY KEY,
             first_name TEXT DEFAULT '',
             username TEXT DEFAULT '',
-            balance BIGINT NOT NULL DEFAULT 0,
+            balance NUMERIC(20,8) NOT NULL DEFAULT 0,
             wallet_address TEXT DEFAULT '',
             wallet_verified BOOLEAN NOT NULL DEFAULT FALSE,
             referred_by BIGINT,
             referral_count INTEGER NOT NULL DEFAULT 0,
+            referral_rewarded BOOLEAN NOT NULL DEFAULT FALSE,
+            referred_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             last_daily TIMESTAMPTZ,
             mining_started TIMESTAMPTZ,
-            mining_ends TIMESTAMPTZ
+            mining_ends TIMESTAMPTZ,
+            mining_claimed_at TIMESTAMPTZ
         )
+    """)
+
+    # Existing database migrations
+    cur.execute("""
+        ALTER TABLE users
+        ALTER COLUMN balance TYPE NUMERIC(20,8)
+        USING balance::NUMERIC(20,8)
+    """)
+
+    cur.execute("""
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS referral_rewarded
+        BOOLEAN NOT NULL DEFAULT FALSE
+    """)
+
+    cur.execute("""
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS referred_at TIMESTAMPTZ
+    """)
+
+    cur.execute("""
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS mining_claimed_at TIMESTAMPTZ
     """)
 
     cur.execute("""
@@ -117,7 +155,7 @@ def init_db():
             ymid TEXT NOT NULL,
             event_type TEXT NOT NULL,
             reward_event_type TEXT,
-            estimated_price NUMERIC(14, 8) DEFAULT 0,
+            estimated_price NUMERIC(14,8) DEFAULT 0,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(ymid, event_type)
         )
@@ -136,7 +174,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS withdrawals (
             id BIGSERIAL PRIMARY KEY,
             telegram_id BIGINT NOT NULL REFERENCES users(telegram_id),
-            amount BIGINT NOT NULL,
+            amount NUMERIC(20,8) NOT NULL,
             wallet_address TEXT NOT NULL,
             network TEXT NOT NULL DEFAULT 'BEP20',
             status TEXT NOT NULL DEFAULT 'pending',
@@ -144,6 +182,12 @@ def init_db():
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             processed_at TIMESTAMPTZ
         )
+    """)
+
+    cur.execute("""
+        ALTER TABLE withdrawals
+        ALTER COLUMN amount TYPE NUMERIC(20,8)
+        USING amount::NUMERIC(20,8)
     """)
 
     cur.execute("""
@@ -165,6 +209,11 @@ def init_db():
         ON task_claims(telegram_id, task_id)
     """)
 
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_users_referrer
+        ON users(referred_by)
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -181,33 +230,33 @@ def startup():
 
 @app.get("/")
 def home():
-    index_file = BASE_DIR / "index.html"
+    file = BASE_DIR / "index.html"
 
-    if not index_file.exists():
+    if not file.exists():
         raise HTTPException(404, "index.html not found")
 
-    return FileResponse(index_file, media_type="text/html")
+    return FileResponse(file, media_type="text/html")
 
 
 @app.get("/style.css")
 def serve_css():
-    css_file = BASE_DIR / "style.css"
+    file = BASE_DIR / "style.css"
 
-    if not css_file.exists():
+    if not file.exists():
         raise HTTPException(404, "style.css not found")
 
-    return FileResponse(css_file, media_type="text/css")
+    return FileResponse(file, media_type="text/css")
 
 
 @app.get("/app.js")
 def serve_js():
-    js_file = BASE_DIR / "app.js"
+    file = BASE_DIR / "app.js"
 
-    if not js_file.exists():
+    if not file.exists():
         raise HTTPException(404, "app.js not found")
 
     return FileResponse(
-        js_file,
+        file,
         media_type="application/javascript"
     )
 
@@ -216,10 +265,6 @@ def serve_js():
 def favicon():
     raise HTTPException(404, "No favicon")
 
-
-# ==================================================
-# HEALTH CHECK
-# ==================================================
 
 @app.get("/health")
 def health():
@@ -238,8 +283,8 @@ def health():
 
     except Exception:
         raise HTTPException(
-            status_code=503,
-            detail="Database connection failed"
+            503,
+            "Database connection failed"
         )
 
 
@@ -247,8 +292,7 @@ def health():
 # TELEGRAM AUTHENTICATION
 # ==================================================
 
-def verify_telegram_init_data(init_data: str):
-
+def verify_telegram_init_data(init_data):
     if not BOT_TOKEN:
         raise HTTPException(500, "BOT_TOKEN is not configured")
 
@@ -317,7 +361,6 @@ def verify_telegram_init_data(init_data: str):
 def current_user(
     x_telegram_init_data: str = Header(default="")
 ):
-
     telegram_user = verify_telegram_init_data(
         x_telegram_init_data
     )
@@ -357,9 +400,124 @@ def current_user(
 
 
 def require_admin(telegram_id):
-
     if str(telegram_id) not in ADMIN_TELEGRAM_IDS:
         raise HTTPException(403, "Admin access required")
+
+
+# ==================================================
+# OFFICIAL CHANNEL VERIFICATION
+# ==================================================
+
+def telegram_api(method, params):
+    if not BOT_TOKEN:
+        raise HTTPException(500, "BOT_TOKEN is not configured")
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+
+    data = urllib.parse.urlencode(params).encode()
+
+    request = urllib.request.Request(
+        url,
+        data=data,
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=15
+        ) as response:
+            result = json.loads(response.read().decode())
+
+    except Exception:
+        raise HTTPException(
+            503,
+            "Telegram verification service unavailable"
+        )
+
+    if not result.get("ok"):
+        raise HTTPException(
+            503,
+            "Unable to verify channel membership. Check bot admin permission."
+        )
+
+    return result.get("result")
+
+
+def check_channel_membership(telegram_id):
+    member = telegram_api(
+        "getChatMember",
+        {
+            "chat_id": OFFICIAL_CHANNEL,
+            "user_id": telegram_id
+        }
+    )
+
+    status = member.get("status")
+
+    is_member = (
+        status in ("creator", "administrator", "member")
+        or (
+            status == "restricted"
+            and member.get("is_member") is True
+        )
+    )
+
+    return is_member
+
+
+def require_channel(telegram_id):
+    if not check_channel_membership(telegram_id):
+        raise HTTPException(
+            403,
+            {
+                "code": "CHANNEL_JOIN_REQUIRED",
+                "message": "Join the official channel first",
+                "channel": OFFICIAL_CHANNEL_LINK
+            }
+        )
+
+
+@app.get("/api/channel/status")
+def channel_status(
+    x_telegram_init_data: str = Header(default="")
+):
+    user = current_user(x_telegram_init_data)
+
+    joined = check_channel_membership(
+        user["telegram_id"]
+    )
+
+    return {
+        "joined": joined,
+        "channel": OFFICIAL_CHANNEL_LINK
+    }
+
+
+@app.post("/api/channel/verify")
+def channel_verify(
+    x_telegram_init_data: str = Header(default="")
+):
+    user = current_user(x_telegram_init_data)
+
+    joined = check_channel_membership(
+        user["telegram_id"]
+    )
+
+    if not joined:
+        raise HTTPException(
+            403,
+            {
+                "code": "CHANNEL_JOIN_REQUIRED",
+                "message": "You have not joined the official channel",
+                "channel": OFFICIAL_CHANNEL_LINK
+            }
+        )
+
+    return {
+        "success": True,
+        "joined": True
+    }
 
 
 # ==================================================
@@ -371,7 +529,7 @@ class WalletBody(BaseModel):
 
 
 class WithdrawBody(BaseModel):
-    amount: int = Field(gt=0)
+    amount: Decimal = Field(gt=0)
     wallet_address: str
     network: str = "BEP20"
 
@@ -391,11 +549,10 @@ class ApproveBody(BaseModel):
 
 
 # ==================================================
-# HELPER FUNCTIONS
+# HELPERS
 # ==================================================
 
 def valid_bsc_address(address):
-
     return (
         isinstance(address, str)
         and len(address) == 42
@@ -407,18 +564,82 @@ def valid_bsc_address(address):
     )
 
 
-def make_user_response(user):
+def as_decimal(value):
+    return Decimal(str(value or 0))
 
+
+def usd_value(cherry):
+    return (
+        as_decimal(cherry) / CHERRY_PER_USD
+    ).quantize(
+        Decimal("0.00000001"),
+        rounding=ROUND_DOWN
+    )
+
+
+def mining_amount(user, now=None):
+    now = now or datetime.now(timezone.utc)
+
+    started = user.get("mining_started")
+    ends = user.get("mining_ends")
+
+    if not started or not ends:
+        return Decimal("0")
+
+    if now <= started:
+        return Decimal("0")
+
+    effective_end = min(now, ends)
+
+    claimed_at = user.get("mining_claimed_at") or started
+
+    effective_start = max(started, claimed_at)
+
+    if effective_end <= effective_start:
+        return Decimal("0")
+
+    total_seconds = Decimal(
+        str((ends - started).total_seconds())
+    )
+
+    elapsed_seconds = Decimal(
+        str((effective_end - effective_start).total_seconds())
+    )
+
+    if total_seconds <= 0:
+        return Decimal("0")
+
+    reward = (
+        MINING_REWARD
+        * elapsed_seconds
+        / total_seconds
+    )
+
+    return reward.quantize(
+        Decimal("0.00000001"),
+        rounding=ROUND_DOWN
+    )
+
+
+def make_user_response(user):
     now = datetime.now(timezone.utc)
 
-    mining_ready = bool(
-        user["mining_ends"]
-        and user["mining_ends"] <= now
+    pending_mining = mining_amount(user, now)
+
+    started = user.get("mining_started")
+    ends = user.get("mining_ends")
+
+    active = bool(
+        started and ends and now < ends
+    )
+
+    completed = bool(
+        started and ends and now >= ends
     )
 
     daily_next = (
         user["last_daily"] + timedelta(hours=24)
-        if user["last_daily"]
+        if user.get("last_daily")
         else None
     )
 
@@ -426,29 +647,58 @@ def make_user_response(user):
         "telegram_id": user["telegram_id"],
         "first_name": user["first_name"],
         "username": user["username"],
-        "balance": user["balance"],
-        "usd_balance": round(
-            user["balance"] / CHERRY_PER_USD,
-            4
-        ),
+
+        "balance": float(user["balance"]),
+        "usd_balance": float(usd_value(user["balance"])),
+
         "wallet_address": user["wallet_address"],
         "wallet_verified": user["wallet_verified"],
+
         "referral_count": user["referral_count"],
+
         "mining_started": (
-            user["mining_started"].isoformat()
-            if user["mining_started"] else None
+            started.isoformat() if started else None
         ),
+
         "mining_end_at": (
-            user["mining_ends"].isoformat()
-            if user["mining_ends"] else None
+            ends.isoformat() if ends else None
         ),
-        "mining_ready": mining_ready,
-        "mining_reward": MINING_REWARD,
+
+        "mining_active": active,
+        "mining_completed": completed,
+
+        "mining_reward": float(MINING_REWARD),
+
+        "mining_earned": float(pending_mining),
+        "mining_earned_usd": float(usd_value(pending_mining)),
+
+        "mining_claimable": float(pending_mining),
+
+        "mining_progress": (
+            min(
+                100,
+                round(
+                    float(
+                        (now - started).total_seconds()
+                        / (ends - started).total_seconds()
+                        * 100
+                    ),
+                    2
+                )
+            )
+            if started and ends and now > started
+            else 0
+        ),
+
+        "cherry_per_usd": float(CHERRY_PER_USD),
+
         "daily_next_at": (
             daily_next.isoformat()
             if daily_next else None
         ),
-        "daily_reward": DAILY_REWARD,
+
+        "daily_reward": float(DAILY_REWARD),
+
         "referral_link": (
             f"https://t.me/CherryMiningBot?start={user['telegram_id']}"
         )
@@ -463,14 +713,13 @@ def make_user_response(user):
 def me(
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
 
     return make_user_response(user)
 
 
 # ==================================================
-# REFERRAL
+# REFERRAL SYSTEM
 # ==================================================
 
 @app.post("/api/referral/claim")
@@ -478,12 +727,11 @@ def referral_claim(
     x_telegram_init_data: str = Header(default=""),
     start: str = ""
 ):
-
     user = current_user(x_telegram_init_data)
 
     try:
         referrer_id = int(start)
-    except ValueError:
+    except (ValueError, TypeError):
         raise HTTPException(400, "Invalid referral ID")
 
     new_user_id = user["telegram_id"]
@@ -529,34 +777,228 @@ def referral_claim(
 
     cur.execute("""
         UPDATE users
-        SET referred_by = %s
+        SET referred_by = %s,
+            referred_at = NOW(),
+            referral_rewarded = FALSE
         WHERE telegram_id = %s
-    """, (referrer_id, new_user_id))
+    """, (
+        referrer_id,
+        new_user_id
+    ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {
+        "success": True,
+        "message": "Referral registered. Complete 10 tasks within 24 hours."
+    }
+
+
+def process_referral_reward(cur, telegram_id, now):
+    cur.execute("""
+        SELECT
+            referred_by,
+            referred_at,
+            referral_rewarded
+        FROM users
+        WHERE telegram_id = %s
+        FOR UPDATE
+    """, (telegram_id,))
+
+    referred = cur.fetchone()
+
+    if not referred:
+        return False
+
+    if (
+        not referred["referred_by"]
+        or not referred["referred_at"]
+        or referred["referral_rewarded"]
+    ):
+        return False
+
+    deadline = (
+        referred["referred_at"]
+        + timedelta(hours=REFERRAL_DEADLINE_HOURS)
+    )
+
+    if now > deadline:
+        return False
+
+    cur.execute("""
+        SELECT COUNT(DISTINCT task_id) AS total
+        FROM task_claims
+        WHERE telegram_id = %s
+        AND claimed_at <= %s
+    """, (
+        telegram_id,
+        deadline
+    ))
+
+    total = cur.fetchone()["total"]
+
+    if total < REFERRAL_TASK_LIMIT:
+        return False
+
+    # Mark referred account as rewarded only once
+    cur.execute("""
+        UPDATE users
+        SET referral_rewarded = TRUE
+        WHERE telegram_id = %s
+        AND referral_rewarded = FALSE
+        RETURNING telegram_id
+    """, (telegram_id,))
+
+    changed = cur.fetchone()
+
+    if not changed:
+        return False
 
     cur.execute("""
         UPDATE users
         SET balance = balance + %s,
             referral_count = referral_count + 1
         WHERE telegram_id = %s
-    """, (REFERRAL_REWARD, referrer_id))
+    """, (
+        REFERRAL_REWARD,
+        referred["referred_by"]
+    ))
 
-    conn.commit()
+    return True
+
+
+@app.get("/api/referrals")
+def referral_list(
+    x_telegram_init_data: str = Header(default="")
+):
+    user = current_user(x_telegram_init_data)
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            telegram_id,
+            first_name,
+            username,
+            referred_at,
+            referral_rewarded
+        FROM users
+        WHERE referred_by = %s
+        ORDER BY referred_at DESC
+    """, (user["telegram_id"],))
+
+    rows = cur.fetchall()
+
+    now = datetime.now(timezone.utc)
+
+    referrals = []
+
+    approved = 0
+    pending = 0
+    expired = 0
+
+    for row in rows:
+        referred_at = row["referred_at"]
+
+        if row["referral_rewarded"]:
+            status = "approved"
+            approved += 1
+
+        elif (
+            referred_at
+            and now > referred_at + timedelta(hours=24)
+        ):
+            status = "expired"
+            expired += 1
+
+        else:
+            status = "pending"
+            pending += 1
+
+        referrals.append({
+            "telegram_id": row["telegram_id"],
+            "first_name": row["first_name"],
+            "username": row["username"],
+            "referred_at": (
+                referred_at.isoformat()
+                if referred_at else None
+            ),
+            "status": status,
+            "bonus": (
+                float(REFERRAL_REWARD)
+                if status == "approved"
+                else 0
+            )
+        })
+
+    cur.execute("""
+        SELECT COALESCE(SUM(balance), 0) AS balance
+        FROM users
+        WHERE telegram_id = %s
+    """, (user["telegram_id"],))
+
     cur.close()
     conn.close()
 
-    return {"success": True}
+    return {
+        "referral_link": (
+            f"https://t.me/CherryMiningBot?start={user['telegram_id']}"
+        ),
+        "total": len(referrals),
+        "approved": approved,
+        "pending": pending,
+        "expired": expired,
+        "bonus_per_referral": float(REFERRAL_REWARD),
+        "total_bonus": float(
+            approved * REFERRAL_REWARD
+        ),
+        "referrals": referrals
+    }
 
 
 # ==================================================
 # MINING
 # ==================================================
 
+@app.get("/api/mining/status")
+def mining_status(
+    x_telegram_init_data: str = Header(default="")
+):
+    user = current_user(x_telegram_init_data)
+
+    require_channel(user["telegram_id"])
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT *
+        FROM users
+        WHERE telegram_id = %s
+    """, (user["telegram_id"],))
+
+    account = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return {
+        "success": True,
+        **make_user_response(account)
+    }
+
+
 @app.post("/api/mining/start")
 def mining_start(
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
+
+    # Channel membership is mandatory
+    require_channel(user["telegram_id"])
 
     now = datetime.now(timezone.utc)
     end_time = now + timedelta(hours=MINING_HOURS)
@@ -565,7 +1007,7 @@ def mining_start(
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT mining_ends
+        SELECT *
         FROM users
         WHERE telegram_id = %s
         FOR UPDATE
@@ -573,20 +1015,40 @@ def mining_start(
 
     row = cur.fetchone()
 
-    if row["mining_ends"] and row["mining_ends"] > now:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        raise HTTPException(400, "Mining is already running")
+    if row["mining_started"] and row["mining_ends"]:
+        if row["mining_ends"] > now:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            raise HTTPException(
+                400,
+                "Mining is already running"
+            )
+
+        # Do not discard unclaimed Cherry from a previous cycle
+        remaining = mining_amount(row, now)
+
+        if remaining > 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            raise HTTPException(
+                400,
+                "Claim your previous mining reward first"
+            )
 
     cur.execute("""
         UPDATE users
         SET mining_started = %s,
-            mining_ends = %s
+            mining_ends = %s,
+            mining_claimed_at = %s
         WHERE telegram_id = %s
     """, (
         now,
         end_time,
+        now,
         user["telegram_id"]
     ))
 
@@ -596,7 +1058,10 @@ def mining_start(
 
     return {
         "success": True,
-        "mining_end_at": end_time.isoformat()
+        "mining_started": now.isoformat(),
+        "mining_end_at": end_time.isoformat(),
+        "reward": float(MINING_REWARD),
+        "duration_hours": MINING_HOURS
     }
 
 
@@ -604,15 +1069,18 @@ def mining_start(
 def mining_claim(
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
+
+    # Channel membership is mandatory
+    require_channel(user["telegram_id"])
+
     now = datetime.now(timezone.utc)
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT mining_ends
+        SELECT *
         FROM users
         WHERE telegram_id = %s
         FOR UPDATE
@@ -620,22 +1088,44 @@ def mining_claim(
 
     row = cur.fetchone()
 
-    if not row["mining_ends"] or row["mining_ends"] > now:
+    if not row["mining_started"] or not row["mining_ends"]:
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Mining is not completed")
 
+        raise HTTPException(400, "Mining is not running")
+
+    reward = mining_amount(row, now)
+
+    if reward <= 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+
+        raise HTTPException(400, "No Cherry available to claim")
+
+    # Add only the amount earned since the last claim
     cur.execute("""
         UPDATE users
         SET balance = balance + %s,
-            mining_started = NULL,
-            mining_ends = NULL
+            mining_claimed_at = %s
         WHERE telegram_id = %s
     """, (
-        MINING_REWARD,
+        reward,
+        now,
         user["telegram_id"]
     ))
+
+    # When the cycle has ended and all reward has been claimed,
+    # clear the cycle so a new one can start.
+    if now >= row["mining_ends"]:
+        cur.execute("""
+            UPDATE users
+            SET mining_started = NULL,
+                mining_ends = NULL,
+                mining_claimed_at = NULL
+            WHERE telegram_id = %s
+        """, (user["telegram_id"],))
 
     conn.commit()
     cur.close()
@@ -643,7 +1133,9 @@ def mining_claim(
 
     return {
         "success": True,
-        "reward": MINING_REWARD
+        "reward": float(reward),
+        "usd_reward": float(usd_value(reward)),
+        "message": "Cherry claimed successfully"
     }
 
 
@@ -655,8 +1147,10 @@ def mining_claim(
 def daily_claim(
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
+
+    require_channel(user["telegram_id"])
+
     now = datetime.now(timezone.utc)
 
     conn = db()
@@ -697,7 +1191,8 @@ def daily_claim(
 
     return {
         "success": True,
-        "reward": DAILY_REWARD
+        "reward": float(DAILY_REWARD),
+        "usd_reward": float(usd_value(DAILY_REWARD))
     }
 
 
@@ -709,8 +1204,10 @@ def daily_claim(
 def get_tasks(
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
+
+    require_channel(user["telegram_id"])
+
     now = datetime.now(timezone.utc)
 
     conn = db()
@@ -734,7 +1231,6 @@ def get_tasks(
     result = []
 
     for task_id in range(1, 11):
-
         last_claim = claimed.get(task_id)
 
         completed = bool(
@@ -746,7 +1242,7 @@ def get_tasks(
             "id": task_id,
             "title": f"Daily Ad Task {task_id}",
             "description": "Watch a rewarded ad to earn Cherry.",
-            "reward": TASK_REWARD,
+            "reward": float(TASK_REWARD),
             "completed": completed,
             "next_available_at": (
                 (last_claim + timedelta(hours=24)).isoformat()
@@ -766,8 +1262,9 @@ def create_ad_session(
     x_telegram_init_data: str = Header(default=""),
     task_id: int = 1
 ):
-
     user = current_user(x_telegram_init_data)
+
+    require_channel(user["telegram_id"])
 
     if task_id < 1 or task_id > 10:
         raise HTTPException(400, "Invalid task")
@@ -809,8 +1306,9 @@ def get_ad_session(
     session_id: str,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
+
+    require_channel(user["telegram_id"])
 
     conn = db()
     cur = conn.cursor()
@@ -842,8 +1340,10 @@ def complete_task(
     body: TaskCompleteBody,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
+
+    require_channel(user["telegram_id"])
+
     now = datetime.now(timezone.utc)
 
     conn = db()
@@ -868,7 +1368,11 @@ def complete_task(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Verified ad reward not found")
+
+        raise HTTPException(
+            400,
+            "Verified ad reward not found"
+        )
 
     cur.execute("""
         SELECT claimed_at
@@ -891,17 +1395,23 @@ def complete_task(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Task already completed today")
+
+        raise HTTPException(
+            400,
+            "Task already completed today"
+        )
 
     cur.execute("""
         INSERT INTO task_claims (
             telegram_id,
-            task_id
+            task_id,
+            claimed_at
         )
-        VALUES (%s, %s)
+        VALUES (%s, %s, %s)
     """, (
         user["telegram_id"],
-        task_id
+        task_id,
+        now
     ))
 
     cur.execute("""
@@ -915,9 +1425,19 @@ def complete_task(
 
     cur.execute("""
         UPDATE ad_sessions
-        SET status = 'claimed'
+        SET status = 'claimed',
+            rewarded_at = %s
         WHERE id = %s
-    """, (body.session_id,))
+    """, (
+        now,
+        body.session_id
+    ))
+
+    referral_approved = process_referral_reward(
+        cur,
+        user["telegram_id"],
+        now
+    )
 
     conn.commit()
     cur.close()
@@ -925,7 +1445,12 @@ def complete_task(
 
     return {
         "success": True,
-        "reward": TASK_REWARD
+        "reward": float(TASK_REWARD),
+        "referral_approved": referral_approved,
+        "referral_bonus": (
+            float(REFERRAL_REWARD)
+            if referral_approved else 0
+        )
     }
 
 
@@ -941,9 +1466,11 @@ def monetag_postback(
     reward_event_type: str = "",
     estimated_price: float = 0
 ):
-
     if not MONETAG_SECRET:
-        raise HTTPException(500, "MONETAG_SECRET is not configured")
+        raise HTTPException(
+            500,
+            "MONETAG_SECRET is not configured"
+        )
 
     if not hmac.compare_digest(secret, MONETAG_SECRET):
         raise HTTPException(403, "Invalid postback secret")
@@ -1024,7 +1551,6 @@ def save_wallet(
     body: WalletBody,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
 
     if not valid_bsc_address(body.address):
@@ -1055,7 +1581,6 @@ def wallet_challenge(
     body: WalletBody,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
 
     if not valid_bsc_address(body.address):
@@ -1107,7 +1632,6 @@ def wallet_confirm(
     body: WalletConfirmBody,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
 
     conn = db()
@@ -1131,7 +1655,11 @@ def wallet_confirm(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Invalid or expired wallet challenge")
+
+        raise HTTPException(
+            400,
+            "Invalid or expired wallet challenge"
+        )
 
     try:
         signed_message = encode_defunct(text=body.message)
@@ -1145,13 +1673,18 @@ def wallet_confirm(
         conn.rollback()
         cur.close()
         conn.close()
+
         raise HTTPException(400, "Invalid wallet signature")
 
     if recovered.lower() != body.address.lower():
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Wallet signature does not match")
+
+        raise HTTPException(
+            400,
+            "Wallet signature does not match"
+        )
 
     cur.execute("""
         UPDATE users
@@ -1187,7 +1720,6 @@ def create_withdrawal(
     body: WithdrawBody,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
 
     if body.network != "BEP20":
@@ -1230,7 +1762,10 @@ def create_withdrawal(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Wallet does not match saved wallet")
+        raise HTTPException(
+            400,
+            "Wallet does not match saved wallet"
+        )
 
     cur.execute("""
         SELECT COUNT(*) AS total
@@ -1244,15 +1779,17 @@ def create_withdrawal(
         conn.rollback()
         cur.close()
         conn.close()
+
         raise HTTPException(
             400,
             "Wallet verification is required for subsequent withdrawals"
         )
 
-    if account["balance"] < body.amount:
+    if as_decimal(account["balance"]) < body.amount:
         conn.rollback()
         cur.close()
         conn.close()
+
         raise HTTPException(400, "Insufficient Cherry balance")
 
     cur.execute("""
@@ -1296,7 +1833,6 @@ def create_withdrawal(
 def withdrawal_history(
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
 
     conn = db()
@@ -1326,6 +1862,7 @@ def withdrawal_history(
         "withdrawals": [
             {
                 **dict(row),
+                "amount": float(row["amount"]),
                 "created_at": row["created_at"].isoformat()
             }
             for row in rows
@@ -1341,7 +1878,6 @@ def withdrawal_history(
 def admin_withdrawals(
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
     require_admin(user["telegram_id"])
 
@@ -1364,6 +1900,7 @@ def admin_withdrawals(
         "withdrawals": [
             {
                 **dict(row),
+                "amount": float(row["amount"]),
                 "created_at": row["created_at"].isoformat()
             }
             for row in rows
@@ -1377,7 +1914,6 @@ def approve_withdrawal(
     body: ApproveBody,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
     require_admin(user["telegram_id"])
 
@@ -1403,6 +1939,7 @@ def approve_withdrawal(
         conn.rollback()
         cur.close()
         conn.close()
+
         raise HTTPException(
             404,
             "Pending withdrawal not found"
@@ -1423,7 +1960,6 @@ def reject_withdrawal(
     withdrawal_id: int,
     x_telegram_init_data: str = Header(default="")
 ):
-
     user = current_user(x_telegram_init_data)
     require_admin(user["telegram_id"])
 
@@ -1444,6 +1980,7 @@ def reject_withdrawal(
         conn.rollback()
         cur.close()
         conn.close()
+
         raise HTTPException(
             404,
             "Pending withdrawal not found"
