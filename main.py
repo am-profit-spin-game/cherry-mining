@@ -5,19 +5,48 @@ import hmac
 import hashlib
 import secrets
 import string
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
+
+# ==================================================
+# CONFIGURATION
+# ==================================================
+
 load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+MONETAG_SECRET = os.getenv("MONETAG_SECRET", "")
+
+ADMIN_TELEGRAM_IDS = {
+    x.strip()
+    for x in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",")
+    if x.strip()
+}
+
+MINING_REWARD = int(os.getenv("MINING_REWARD", "500"))
+REFERRAL_REWARD = int(os.getenv("REFERRAL_REWARD", "100"))
+TASK_REWARD = int(os.getenv("TASK_REWARD", "50"))
+
+MIN_WITHDRAW = 10000
+CHERRY_PER_USD = 10000
+DAILY_REWARD = 100
+MINING_HOURS = 24
+
 
 app = FastAPI(title="Cherry Mining API")
 
@@ -29,34 +58,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-ADMIN_TELEGRAM_IDS = {
-    x.strip() for x in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",") if x.strip()
-}
 
-MIN_WITHDRAW = 10000
-CHERRY_PER_USD = 10000
-DAILY_REWARD = 100
-MINING_HOURS = 24
-MINING_REWARD = int(os.getenv("MINING_REWARD", "500"))
-REFERRAL_REWARD = int(os.getenv("REFERRAL_REWARD", "100"))
-TASK_REWARD = int(os.getenv("TASK_REWARD", "50"))
-MONETAG_SECRET = os.getenv("MONETAG_SECRET", "")
-
-app.state.ready = False
-
-
-# ---------------- DATABASE ----------------
+# ==================================================
+# DATABASE
+# ==================================================
 
 def db():
     if not DATABASE_URL:
-        raise HTTPException(500, "DATABASE_URL is not configured")
+        raise HTTPException(
+            status_code=500,
+            detail="DATABASE_URL is not configured"
+        )
 
     return psycopg2.connect(
         DATABASE_URL,
         cursor_factory=RealDictCursor,
-        sslmode="require"
+        sslmode="require",
+        connect_timeout=15
     )
 
 
@@ -65,77 +83,86 @@ def init_db():
     cur = conn.cursor()
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        telegram_id BIGINT PRIMARY KEY,
-        first_name TEXT DEFAULT '',
-        username TEXT DEFAULT '',
-        balance BIGINT NOT NULL DEFAULT 0,
-        wallet_address TEXT DEFAULT '',
-        wallet_verified BOOLEAN NOT NULL DEFAULT FALSE,
-        referred_by BIGINT,
-        referral_count INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_daily TIMESTAMPTZ,
-        mining_started TIMESTAMPTZ,
-        mining_ends TIMESTAMPTZ
-    )
+        CREATE TABLE IF NOT EXISTS users (
+            telegram_id BIGINT PRIMARY KEY,
+            first_name TEXT DEFAULT '',
+            username TEXT DEFAULT '',
+            balance BIGINT NOT NULL DEFAULT 0,
+            wallet_address TEXT DEFAULT '',
+            wallet_verified BOOLEAN NOT NULL DEFAULT FALSE,
+            referred_by BIGINT,
+            referral_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_daily TIMESTAMPTZ,
+            mining_started TIMESTAMPTZ,
+            mining_ends TIMESTAMPTZ
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS ad_sessions (
-        id TEXT PRIMARY KEY,
-        ymid TEXT UNIQUE NOT NULL,
-        telegram_id BIGINT NOT NULL REFERENCES users(telegram_id),
-        task_id INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        rewarded_at TIMESTAMPTZ
-    )
+        CREATE TABLE IF NOT EXISTS ad_sessions (
+            id TEXT PRIMARY KEY,
+            ymid TEXT UNIQUE NOT NULL,
+            telegram_id BIGINT NOT NULL REFERENCES users(telegram_id),
+            task_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            rewarded_at TIMESTAMPTZ
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS ad_events (
-        id BIGSERIAL PRIMARY KEY,
-        ymid TEXT NOT NULL,
-        event_type TEXT NOT NULL,
-        reward_event_type TEXT,
-        estimated_price NUMERIC(14, 8) DEFAULT 0,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE(ymid, event_type)
-    )
+        CREATE TABLE IF NOT EXISTS ad_events (
+            id BIGSERIAL PRIMARY KEY,
+            ymid TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            reward_event_type TEXT,
+            estimated_price NUMERIC(14, 8) DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(ymid, event_type)
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS task_claims (
-        id BIGSERIAL PRIMARY KEY,
-        telegram_id BIGINT NOT NULL REFERENCES users(telegram_id),
-        task_id INTEGER NOT NULL,
-        claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE(telegram_id, task_id, claimed_at)
-    )
+        CREATE TABLE IF NOT EXISTS task_claims (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_id BIGINT NOT NULL REFERENCES users(telegram_id),
+            task_id INTEGER NOT NULL,
+            claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS withdrawals (
-        id BIGSERIAL PRIMARY KEY,
-        telegram_id BIGINT NOT NULL REFERENCES users(telegram_id),
-        amount BIGINT NOT NULL,
-        wallet_address TEXT NOT NULL,
-        network TEXT NOT NULL DEFAULT 'BEP20',
-        status TEXT NOT NULL DEFAULT 'pending',
-        tx_hash TEXT DEFAULT '',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        processed_at TIMESTAMPTZ
-    )
+        CREATE TABLE IF NOT EXISTS withdrawals (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_id BIGINT NOT NULL REFERENCES users(telegram_id),
+            amount BIGINT NOT NULL,
+            wallet_address TEXT NOT NULL,
+            network TEXT NOT NULL DEFAULT 'BEP20',
+            status TEXT NOT NULL DEFAULT 'pending',
+            tx_hash TEXT DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            processed_at TIMESTAMPTZ
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS wallet_challenges (
-        telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id),
-        address TEXT NOT NULL,
-        message TEXT NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL
-    )
+        CREATE TABLE IF NOT EXISTS wallet_challenges (
+            telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id),
+            address TEXT NOT NULL,
+            message TEXT NOT NULL,
+            expires_at TIMESTAMPTZ NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_withdrawals_user
+        ON withdrawals(telegram_id)
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_task_claims_user
+        ON task_claims(telegram_id, task_id)
     """)
 
     conn.commit()
@@ -146,36 +173,117 @@ def init_db():
 @app.on_event("startup")
 def startup():
     init_db()
-    app.state.ready = True
 
 
-# ---------------- TELEGRAM AUTH ----------------
+# ==================================================
+# FRONTEND FILES
+# ==================================================
+
+@app.get("/")
+def home():
+    index_file = BASE_DIR / "index.html"
+
+    if not index_file.exists():
+        raise HTTPException(404, "index.html not found")
+
+    return FileResponse(index_file, media_type="text/html")
+
+
+@app.get("/style.css")
+def serve_css():
+    css_file = BASE_DIR / "style.css"
+
+    if not css_file.exists():
+        raise HTTPException(404, "style.css not found")
+
+    return FileResponse(css_file, media_type="text/css")
+
+
+@app.get("/app.js")
+def serve_js():
+    js_file = BASE_DIR / "app.js"
+
+    if not js_file.exists():
+        raise HTTPException(404, "app.js not found")
+
+    return FileResponse(
+        js_file,
+        media_type="application/javascript"
+    )
+
+
+@app.get("/favicon.ico")
+def favicon():
+    raise HTTPException(404, "No favicon")
+
+
+# ==================================================
+# HEALTH CHECK
+# ==================================================
+
+@app.get("/health")
+def health():
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        cur.close()
+        conn.close()
+
+        return {
+            "status": "ok",
+            "database": "connected"
+        }
+
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Database connection failed"
+        )
+
+
+# ==================================================
+# TELEGRAM AUTHENTICATION
+# ==================================================
 
 def verify_telegram_init_data(init_data: str):
+
     if not BOT_TOKEN:
         raise HTTPException(500, "BOT_TOKEN is not configured")
 
     if not init_data:
-        raise HTTPException(401, "Open this app inside Telegram")
+        raise HTTPException(
+            401,
+            "Open this application inside Telegram"
+        )
 
-    values = dict(parse_qsl(init_data, keep_blank_values=True))
+    values = dict(
+        parse_qsl(init_data, keep_blank_values=True)
+    )
+
     received_hash = values.pop("hash", None)
 
     if not received_hash:
         raise HTTPException(401, "Invalid Telegram data")
 
     auth_date = values.get("auth_date")
+
     if not auth_date:
         raise HTTPException(401, "Missing authentication date")
 
     try:
-        if datetime.now(timezone.utc).timestamp() - int(auth_date) > 86400:
+        timestamp = int(auth_date)
+
+        if datetime.now(timezone.utc).timestamp() - timestamp > 86400:
             raise HTTPException(401, "Telegram session expired")
+
     except ValueError:
         raise HTTPException(401, "Invalid authentication date")
 
     data_check_string = "\n".join(
-        f"{key}={value}" for key, value in sorted(values.items())
+        f"{key}={value}"
+        for key, value in sorted(values.items())
     )
 
     secret_key = hmac.new(
@@ -190,39 +298,55 @@ def verify_telegram_init_data(init_data: str):
         hashlib.sha256
     ).hexdigest()
 
-    if not hmac.compare_digest(calculated_hash, received_hash):
-        raise HTTPException(401, "Telegram authentication failed")
+    if not hmac.compare_digest(
+        calculated_hash,
+        received_hash
+    ):
+        raise HTTPException(
+            401,
+            "Telegram authentication failed"
+        )
 
     try:
-        user = json.loads(values["user"])
-        return user
+        return json.loads(values["user"])
+
     except Exception:
-        raise HTTPException(401, "Invalid Telegram user data")
+        raise HTTPException(401, "Invalid Telegram user")
 
 
-def get_user(init_data: str):
-    telegram_user = verify_telegram_init_data(init_data)
+def current_user(
+    x_telegram_init_data: str = Header(default="")
+):
+
+    telegram_user = verify_telegram_init_data(
+        x_telegram_init_data
+    )
 
     telegram_id = int(telegram_user["id"])
-    first_name = telegram_user.get("first_name", "")
-    username = telegram_user.get("username", "")
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        INSERT INTO users (telegram_id, first_name, username)
+        INSERT INTO users (
+            telegram_id,
+            first_name,
+            username
+        )
         VALUES (%s, %s, %s)
+
         ON CONFLICT (telegram_id)
         DO UPDATE SET
             first_name = EXCLUDED.first_name,
             username = EXCLUDED.username
-    """, (telegram_id, first_name, username))
 
-    cur.execute(
-        "SELECT * FROM users WHERE telegram_id = %s",
-        (telegram_id,)
-    )
+        RETURNING *
+    """, (
+        telegram_id,
+        telegram_user.get("first_name", ""),
+        telegram_user.get("username", "")
+    ))
+
     user = cur.fetchone()
 
     conn.commit()
@@ -232,16 +356,15 @@ def get_user(init_data: str):
     return user
 
 
-def current_user(x_telegram_init_data: str):
-    return get_user(x_telegram_init_data)
+def require_admin(telegram_id):
 
-
-def require_admin(user_id):
-    if str(user_id) not in ADMIN_TELEGRAM_IDS:
+    if str(telegram_id) not in ADMIN_TELEGRAM_IDS:
         raise HTTPException(403, "Admin access required")
 
 
-# ---------------- MODELS ----------------
+# ==================================================
+# REQUEST MODELS
+# ==================================================
 
 class WalletBody(BaseModel):
     address: str
@@ -263,18 +386,40 @@ class TaskCompleteBody(BaseModel):
     session_id: str
 
 
-# ---------------- HELPERS ----------------
+class ApproveBody(BaseModel):
+    tx_hash: str = ""
 
-def user_data(user):
+
+# ==================================================
+# HELPER FUNCTIONS
+# ==================================================
+
+def valid_bsc_address(address):
+
+    return (
+        isinstance(address, str)
+        and len(address) == 42
+        and address.startswith("0x")
+        and all(
+            char in string.hexdigits
+            for char in address[2:]
+        )
+    )
+
+
+def make_user_response(user):
+
     now = datetime.now(timezone.utc)
 
     mining_ready = bool(
-        user["mining_ends"] and user["mining_ends"] <= now
+        user["mining_ends"]
+        and user["mining_ends"] <= now
     )
 
     daily_next = (
         user["last_daily"] + timedelta(hours=24)
-        if user["last_daily"] else None
+        if user["last_daily"]
+        else None
     )
 
     return {
@@ -282,95 +427,98 @@ def user_data(user):
         "first_name": user["first_name"],
         "username": user["username"],
         "balance": user["balance"],
-        "usd_balance": round(user["balance"] / CHERRY_PER_USD, 4),
+        "usd_balance": round(
+            user["balance"] / CHERRY_PER_USD,
+            4
+        ),
         "wallet_address": user["wallet_address"],
         "wallet_verified": user["wallet_verified"],
         "referral_count": user["referral_count"],
-        "mining_started": user["mining_started"].isoformat()
-            if user["mining_started"] else None,
-        "mining_end_at": user["mining_ends"].isoformat()
-            if user["mining_ends"] else None,
+        "mining_started": (
+            user["mining_started"].isoformat()
+            if user["mining_started"] else None
+        ),
+        "mining_end_at": (
+            user["mining_ends"].isoformat()
+            if user["mining_ends"] else None
+        ),
         "mining_ready": mining_ready,
         "mining_reward": MINING_REWARD,
-        "daily_next_at": daily_next.isoformat() if daily_next else None,
+        "daily_next_at": (
+            daily_next.isoformat()
+            if daily_next else None
+        ),
         "daily_reward": DAILY_REWARD,
-        "referral_link": f"https://t.me/CherryMiningBot?start={user['telegram_id']}"
+        "referral_link": (
+            f"https://t.me/CherryMiningBot?start={user['telegram_id']}"
+        )
     }
 
 
-def get_task_status(conn, telegram_id):
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT task_id, MAX(claimed_at) AS last_claim
-        FROM task_claims
-        WHERE telegram_id = %s
-        GROUP BY task_id
-    """, (telegram_id,))
-    rows = cur.fetchall()
-    cur.close()
-
-    result = {}
-    for row in rows:
-        result[row["task_id"]] = row["last_claim"]
-
-    return result
-
-
-# ---------------- BASIC ----------------
-
-@app.get("/")
-def home():
-    return {"status": "online", "app": "Cherry Mining"}
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
+# ==================================================
+# USER PROFILE
+# ==================================================
 
 @app.get("/api/me")
-def me(x_telegram_init_data: str = Header(default="")):
+def me(
+    x_telegram_init_data: str = Header(default="")
+):
+
     user = current_user(x_telegram_init_data)
-    return user_data(user)
+
+    return make_user_response(user)
 
 
-# ---------------- REFERRAL ----------------
+# ==================================================
+# REFERRAL
+# ==================================================
 
 @app.post("/api/referral/claim")
 def referral_claim(
     x_telegram_init_data: str = Header(default=""),
     start: str = ""
 ):
+
     user = current_user(x_telegram_init_data)
-    new_user_id = user["telegram_id"]
 
     try:
         referrer_id = int(start)
     except ValueError:
         raise HTTPException(400, "Invalid referral ID")
 
+    new_user_id = user["telegram_id"]
+
     if referrer_id == new_user_id:
-        raise HTTPException(400, "Self-referral is not allowed")
+        raise HTTPException(400, "Self referral not allowed")
 
     conn = db()
     cur = conn.cursor()
 
-    cur.execute(
-        "SELECT referred_by FROM users WHERE telegram_id = %s FOR UPDATE",
-        (new_user_id,)
-    )
-    current = cur.fetchone()
+    cur.execute("""
+        SELECT referred_by
+        FROM users
+        WHERE telegram_id = %s
+        FOR UPDATE
+    """, (new_user_id,))
 
-    if current["referred_by"] is not None:
+    account = cur.fetchone()
+
+    if account["referred_by"] is not None:
         conn.rollback()
         cur.close()
         conn.close()
-        return {"success": False, "message": "Referral already used"}
 
-    cur.execute(
-        "SELECT telegram_id FROM users WHERE telegram_id = %s",
-        (referrer_id,)
-    )
+        return {
+            "success": False,
+            "message": "Referral already used"
+        }
+
+    cur.execute("""
+        SELECT telegram_id
+        FROM users
+        WHERE telegram_id = %s
+    """, (referrer_id,))
+
     referrer = cur.fetchone()
 
     if not referrer:
@@ -380,7 +528,8 @@ def referral_claim(
         raise HTTPException(404, "Referrer not found")
 
     cur.execute("""
-        UPDATE users SET referred_by = %s
+        UPDATE users
+        SET referred_by = %s
         WHERE telegram_id = %s
     """, (referrer_id, new_user_id))
 
@@ -398,19 +547,28 @@ def referral_claim(
     return {"success": True}
 
 
-# ---------------- MINING ----------------
+# ==================================================
+# MINING
+# ==================================================
 
 @app.post("/api/mining/start")
-def mining_start(x_telegram_init_data: str = Header(default="")):
+def mining_start(
+    x_telegram_init_data: str = Header(default="")
+):
+
     user = current_user(x_telegram_init_data)
+
     now = datetime.now(timezone.utc)
+    end_time = now + timedelta(hours=MINING_HOURS)
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT mining_ends FROM users
-        WHERE telegram_id = %s FOR UPDATE
+        SELECT mining_ends
+        FROM users
+        WHERE telegram_id = %s
+        FOR UPDATE
     """, (user["telegram_id"],))
 
     row = cur.fetchone()
@@ -421,13 +579,16 @@ def mining_start(x_telegram_init_data: str = Header(default="")):
         conn.close()
         raise HTTPException(400, "Mining is already running")
 
-    end_time = now + timedelta(hours=MINING_HOURS)
-
     cur.execute("""
         UPDATE users
-        SET mining_started = %s, mining_ends = %s
+        SET mining_started = %s,
+            mining_ends = %s
         WHERE telegram_id = %s
-    """, (now, end_time, user["telegram_id"]))
+    """, (
+        now,
+        end_time,
+        user["telegram_id"]
+    ))
 
     conn.commit()
     cur.close()
@@ -440,7 +601,10 @@ def mining_start(x_telegram_init_data: str = Header(default="")):
 
 
 @app.post("/api/mining/claim")
-def mining_claim(x_telegram_init_data: str = Header(default="")):
+def mining_claim(
+    x_telegram_init_data: str = Header(default="")
+):
+
     user = current_user(x_telegram_init_data)
     now = datetime.now(timezone.utc)
 
@@ -448,8 +612,10 @@ def mining_claim(x_telegram_init_data: str = Header(default="")):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT mining_ends FROM users
-        WHERE telegram_id = %s FOR UPDATE
+        SELECT mining_ends
+        FROM users
+        WHERE telegram_id = %s
+        FOR UPDATE
     """, (user["telegram_id"],))
 
     row = cur.fetchone()
@@ -458,7 +624,7 @@ def mining_claim(x_telegram_init_data: str = Header(default="")):
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Mining is not completed yet")
+        raise HTTPException(400, "Mining is not completed")
 
     cur.execute("""
         UPDATE users
@@ -466,7 +632,10 @@ def mining_claim(x_telegram_init_data: str = Header(default="")):
             mining_started = NULL,
             mining_ends = NULL
         WHERE telegram_id = %s
-    """, (MINING_REWARD, user["telegram_id"]))
+    """, (
+        MINING_REWARD,
+        user["telegram_id"]
+    ))
 
     conn.commit()
     cur.close()
@@ -478,10 +647,15 @@ def mining_claim(x_telegram_init_data: str = Header(default="")):
     }
 
 
-# ---------------- DAILY BONUS ----------------
+# ==================================================
+# DAILY BONUS
+# ==================================================
 
 @app.post("/api/daily/claim")
-def daily_claim(x_telegram_init_data: str = Header(default="")):
+def daily_claim(
+    x_telegram_init_data: str = Header(default="")
+):
+
     user = current_user(x_telegram_init_data)
     now = datetime.now(timezone.utc)
 
@@ -489,13 +663,18 @@ def daily_claim(x_telegram_init_data: str = Header(default="")):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT last_daily FROM users
-        WHERE telegram_id = %s FOR UPDATE
+        SELECT last_daily
+        FROM users
+        WHERE telegram_id = %s
+        FOR UPDATE
     """, (user["telegram_id"],))
 
     row = cur.fetchone()
 
-    if row["last_daily"] and row["last_daily"] + timedelta(hours=24) > now:
+    if (
+        row["last_daily"]
+        and row["last_daily"] + timedelta(hours=24) > now
+    ):
         conn.rollback()
         cur.close()
         conn.close()
@@ -503,34 +682,64 @@ def daily_claim(x_telegram_init_data: str = Header(default="")):
 
     cur.execute("""
         UPDATE users
-        SET balance = balance + %s, last_daily = %s
+        SET balance = balance + %s,
+            last_daily = %s
         WHERE telegram_id = %s
-    """, (DAILY_REWARD, now, user["telegram_id"]))
+    """, (
+        DAILY_REWARD,
+        now,
+        user["telegram_id"]
+    ))
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return {"success": True, "reward": DAILY_REWARD}
+    return {
+        "success": True,
+        "reward": DAILY_REWARD
+    }
 
 
-# ---------------- TASKS ----------------
+# ==================================================
+# TASKS
+# ==================================================
 
 @app.get("/api/tasks")
-def tasks(x_telegram_init_data: str = Header(default="")):
+def get_tasks(
+    x_telegram_init_data: str = Header(default="")
+):
+
     user = current_user(x_telegram_init_data)
+    now = datetime.now(timezone.utc)
 
     conn = db()
-    claimed = get_task_status(conn, user["telegram_id"])
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT task_id, MAX(claimed_at) AS last_claim
+        FROM task_claims
+        WHERE telegram_id = %s
+        GROUP BY task_id
+    """, (user["telegram_id"],))
+
+    claimed = {
+        row["task_id"]: row["last_claim"]
+        for row in cur.fetchall()
+    }
+
+    cur.close()
     conn.close()
 
-    now = datetime.now(timezone.utc)
     result = []
 
     for task_id in range(1, 11):
+
         last_claim = claimed.get(task_id)
+
         completed = bool(
-            last_claim and last_claim + timedelta(hours=24) > now
+            last_claim
+            and last_claim + timedelta(hours=24) > now
         )
 
         result.append({
@@ -548,11 +757,16 @@ def tasks(x_telegram_init_data: str = Header(default="")):
     return {"tasks": result}
 
 
+# ==================================================
+# MONETAG AD SESSION
+# ==================================================
+
 @app.post("/api/ads/session")
 def create_ad_session(
     x_telegram_init_data: str = Header(default=""),
     task_id: int = 1
 ):
+
     user = current_user(x_telegram_init_data)
 
     if task_id < 1 or task_id > 10:
@@ -565,9 +779,19 @@ def create_ad_session(
     cur = conn.cursor()
 
     cur.execute("""
-        INSERT INTO ad_sessions (id, ymid, telegram_id, task_id)
+        INSERT INTO ad_sessions (
+            id,
+            ymid,
+            telegram_id,
+            task_id
+        )
         VALUES (%s, %s, %s, %s)
-    """, (session_id, ymid, user["telegram_id"], task_id))
+    """, (
+        session_id,
+        ymid,
+        user["telegram_id"],
+        task_id
+    ))
 
     conn.commit()
     cur.close()
@@ -585,17 +809,24 @@ def get_ad_session(
     session_id: str,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT status FROM ad_sessions
-        WHERE id = %s AND telegram_id = %s
-    """, (session_id, user["telegram_id"]))
+        SELECT status
+        FROM ad_sessions
+        WHERE id = %s
+        AND telegram_id = %s
+    """, (
+        session_id,
+        user["telegram_id"]
+    ))
 
     row = cur.fetchone()
+
     cur.close()
     conn.close()
 
@@ -611,6 +842,7 @@ def complete_task(
     body: TaskCompleteBody,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
     now = datetime.now(timezone.utc)
 
@@ -618,10 +850,17 @@ def complete_task(
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT * FROM ad_sessions
-        WHERE id = %s AND telegram_id = %s AND task_id = %s
+        SELECT *
+        FROM ad_sessions
+        WHERE id = %s
+        AND telegram_id = %s
+        AND task_id = %s
         FOR UPDATE
-    """, (body.session_id, user["telegram_id"], task_id))
+    """, (
+        body.session_id,
+        user["telegram_id"],
+        task_id
+    ))
 
     session = cur.fetchone()
 
@@ -632,31 +871,51 @@ def complete_task(
         raise HTTPException(400, "Verified ad reward not found")
 
     cur.execute("""
-        SELECT claimed_at FROM task_claims
-        WHERE telegram_id = %s AND task_id = %s
-        ORDER BY claimed_at DESC LIMIT 1
-    """, (user["telegram_id"], task_id))
+        SELECT claimed_at
+        FROM task_claims
+        WHERE telegram_id = %s
+        AND task_id = %s
+        ORDER BY claimed_at DESC
+        LIMIT 1
+    """, (
+        user["telegram_id"],
+        task_id
+    ))
 
     previous = cur.fetchone()
 
-    if previous and previous["claimed_at"] + timedelta(hours=24) > now:
+    if (
+        previous
+        and previous["claimed_at"] + timedelta(hours=24) > now
+    ):
         conn.rollback()
         cur.close()
         conn.close()
         raise HTTPException(400, "Task already completed today")
 
     cur.execute("""
-        INSERT INTO task_claims (telegram_id, task_id)
+        INSERT INTO task_claims (
+            telegram_id,
+            task_id
+        )
         VALUES (%s, %s)
-    """, (user["telegram_id"], task_id))
+    """, (
+        user["telegram_id"],
+        task_id
+    ))
 
     cur.execute("""
-        UPDATE users SET balance = balance + %s
+        UPDATE users
+        SET balance = balance + %s
         WHERE telegram_id = %s
-    """, (TASK_REWARD, user["telegram_id"]))
+    """, (
+        TASK_REWARD,
+        user["telegram_id"]
+    ))
 
     cur.execute("""
-        UPDATE ad_sessions SET status = 'claimed'
+        UPDATE ad_sessions
+        SET status = 'claimed'
         WHERE id = %s
     """, (body.session_id,))
 
@@ -664,10 +923,15 @@ def complete_task(
     cur.close()
     conn.close()
 
-    return {"success": True, "reward": TASK_REWARD}
+    return {
+        "success": True,
+        "reward": TASK_REWARD
+    }
 
 
-# ---------------- MONETAG POSTBACK ----------------
+# ==================================================
+# MONETAG POSTBACK
+# ==================================================
 
 @app.get("/postback/monetag")
 def monetag_postback(
@@ -675,11 +939,13 @@ def monetag_postback(
     ymid: str = "",
     event_type: str = "",
     reward_event_type: str = "",
-    estimated_price: float = 0,
-    telegram_id: str = "",
-    zone_id: str = ""
+    estimated_price: float = 0
 ):
-    if not MONETAG_SECRET or not hmac.compare_digest(secret, MONETAG_SECRET):
+
+    if not MONETAG_SECRET:
+        raise HTTPException(500, "MONETAG_SECRET is not configured")
+
+    if not hmac.compare_digest(secret, MONETAG_SECRET):
         raise HTTPException(403, "Invalid postback secret")
 
     if not ymid or event_type not in ("impression", "click"):
@@ -689,8 +955,12 @@ def monetag_postback(
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT * FROM ad_sessions WHERE ymid = %s FOR UPDATE
+        SELECT *
+        FROM ad_sessions
+        WHERE ymid = %s
+        FOR UPDATE
     """, (ymid,))
+
     session = cur.fetchone()
 
     if not session:
@@ -700,25 +970,42 @@ def monetag_postback(
         raise HTTPException(404, "Unknown ad session")
 
     cur.execute("""
-        INSERT INTO ad_events
-        (ymid, event_type, reward_event_type, estimated_price)
+        INSERT INTO ad_events (
+            ymid,
+            event_type,
+            reward_event_type,
+            estimated_price
+        )
         VALUES (%s, %s, %s, %s)
-        ON CONFLICT (ymid, event_type) DO NOTHING
-    """, (ymid, event_type, reward_event_type, estimated_price))
+        ON CONFLICT (ymid, event_type)
+        DO NOTHING
+    """, (
+        ymid,
+        event_type,
+        reward_event_type,
+        estimated_price
+    ))
 
-    # Reward only once, on Monetag's valued impression.
-    if event_type == "impression" and reward_event_type == "valued":
+    if (
+        event_type == "impression"
+        and reward_event_type == "valued"
+    ):
         cur.execute("""
             UPDATE ad_sessions
             SET status = 'valued'
-            WHERE ymid = %s AND status = 'pending'
+            WHERE ymid = %s
+            AND status = 'pending'
         """, (ymid,))
 
-    elif event_type == "impression" and reward_event_type == "non_valued":
+    elif (
+        event_type == "impression"
+        and reward_event_type == "non_valued"
+    ):
         cur.execute("""
             UPDATE ad_sessions
             SET status = 'rejected'
-            WHERE ymid = %s AND status = 'pending'
+            WHERE ymid = %s
+            AND status = 'pending'
         """, (ymid,))
 
     conn.commit()
@@ -728,35 +1015,33 @@ def monetag_postback(
     return {"received": True}
 
 
-# ---------------- WALLET ----------------
-
-def valid_bsc_address(address):
-    return (
-        isinstance(address, str)
-        and len(address) == 42
-        and address.startswith("0x")
-        and all(c in string.hexdigits for c in address[2:])
-    )
-
+# ==================================================
+# WALLET
+# ==================================================
 
 @app.post("/api/wallet")
 def save_wallet(
     body: WalletBody,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
 
     if not valid_bsc_address(body.address):
-        raise HTTPException(400, "Invalid BNB Smart Chain wallet address")
+        raise HTTPException(400, "Invalid BNB wallet address")
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
         UPDATE users
-        SET wallet_address = %s, wallet_verified = FALSE
+        SET wallet_address = %s,
+            wallet_verified = FALSE
         WHERE telegram_id = %s
-    """, (body.address, user["telegram_id"]))
+    """, (
+        body.address,
+        user["telegram_id"]
+    ))
 
     conn.commit()
     cur.close()
@@ -770,12 +1055,14 @@ def wallet_challenge(
     body: WalletBody,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
 
     if not valid_bsc_address(body.address):
         raise HTTPException(400, "Invalid wallet address")
 
     nonce = secrets.token_urlsafe(24)
+
     message = (
         "Cherry Mining Wallet Verification\n"
         f"Telegram ID: {user['telegram_id']}\n"
@@ -788,9 +1075,14 @@ def wallet_challenge(
     cur = conn.cursor()
 
     cur.execute("""
-        INSERT INTO wallet_challenges
-        (telegram_id, address, message, expires_at)
+        INSERT INTO wallet_challenges (
+            telegram_id,
+            address,
+            message,
+            expires_at
+        )
         VALUES (%s, %s, %s, %s)
+
         ON CONFLICT (telegram_id)
         DO UPDATE SET
             address = EXCLUDED.address,
@@ -815,14 +1107,17 @@ def wallet_confirm(
     body: WalletConfirmBody,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT * FROM wallet_challenges
-        WHERE telegram_id = %s FOR UPDATE
+        SELECT *
+        FROM wallet_challenges
+        WHERE telegram_id = %s
+        FOR UPDATE
     """, (user["telegram_id"],))
 
     challenge = cur.fetchone()
@@ -836,14 +1131,16 @@ def wallet_confirm(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Wallet verification challenge expired or invalid")
+        raise HTTPException(400, "Invalid or expired wallet challenge")
 
     try:
         signed_message = encode_defunct(text=body.message)
+
         recovered = Account.recover_message(
             signed_message,
             signature=body.signature
         )
+
     except Exception:
         conn.rollback()
         cur.close()
@@ -854,49 +1151,70 @@ def wallet_confirm(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Signature does not match wallet")
+        raise HTTPException(400, "Wallet signature does not match")
 
     cur.execute("""
         UPDATE users
-        SET wallet_address = %s, wallet_verified = TRUE
+        SET wallet_address = %s,
+            wallet_verified = TRUE
         WHERE telegram_id = %s
-    """, (body.address, user["telegram_id"]))
+    """, (
+        body.address,
+        user["telegram_id"]
+    ))
 
     cur.execute("""
-        DELETE FROM wallet_challenges WHERE telegram_id = %s
+        DELETE FROM wallet_challenges
+        WHERE telegram_id = %s
     """, (user["telegram_id"],))
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return {"success": True, "verified": True}
+    return {
+        "success": True,
+        "verified": True
+    }
 
 
-# ---------------- WITHDRAWALS ----------------
+# ==================================================
+# WITHDRAWAL
+# ==================================================
 
 @app.post("/api/withdraw")
 def create_withdrawal(
     body: WithdrawBody,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
 
     if body.network != "BEP20":
-        raise HTTPException(400, "Only BNB Smart Chain BEP20 is supported")
+        raise HTTPException(
+            400,
+            "Only BNB Smart Chain BEP20 is supported"
+        )
 
     if not valid_bsc_address(body.wallet_address):
         raise HTTPException(400, "Invalid wallet address")
 
     if body.amount < MIN_WITHDRAW:
-        raise HTTPException(400, "Minimum withdrawal is 10,000 Cherry")
+        raise HTTPException(
+            400,
+            "Minimum withdrawal is 10,000 Cherry"
+        )
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT * FROM users WHERE telegram_id = %s FOR UPDATE
+        SELECT *
+        FROM users
+        WHERE telegram_id = %s
+        FOR UPDATE
     """, (user["telegram_id"],))
+
     account = cur.fetchone()
 
     if not account["wallet_address"]:
@@ -905,16 +1223,21 @@ def create_withdrawal(
         conn.close()
         raise HTTPException(400, "Save your wallet first")
 
-    if account["wallet_address"].lower() != body.wallet_address.lower():
+    if (
+        account["wallet_address"].lower()
+        != body.wallet_address.lower()
+    ):
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(400, "Withdrawal wallet does not match saved wallet")
+        raise HTTPException(400, "Wallet does not match saved wallet")
 
     cur.execute("""
-        SELECT COUNT(*) AS total FROM withdrawals
+        SELECT COUNT(*) AS total
+        FROM withdrawals
         WHERE telegram_id = %s
     """, (user["telegram_id"],))
+
     previous_count = cur.fetchone()["total"]
 
     if previous_count > 0 and not account["wallet_verified"]:
@@ -933,13 +1256,21 @@ def create_withdrawal(
         raise HTTPException(400, "Insufficient Cherry balance")
 
     cur.execute("""
-        UPDATE users SET balance = balance - %s
+        UPDATE users
+        SET balance = balance - %s
         WHERE telegram_id = %s
-    """, (body.amount, user["telegram_id"]))
+    """, (
+        body.amount,
+        user["telegram_id"]
+    ))
 
     cur.execute("""
-        INSERT INTO withdrawals
-        (telegram_id, amount, wallet_address, network)
+        INSERT INTO withdrawals (
+            telegram_id,
+            amount,
+            wallet_address,
+            network
+        )
         VALUES (%s, %s, %s, 'BEP20')
         RETURNING id
     """, (
@@ -962,15 +1293,24 @@ def create_withdrawal(
 
 
 @app.get("/api/withdrawals")
-def withdrawal_history(x_telegram_init_data: str = Header(default="")):
+def withdrawal_history(
+    x_telegram_init_data: str = Header(default="")
+):
+
     user = current_user(x_telegram_init_data)
 
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, amount, wallet_address, network, status,
-               tx_hash, created_at
+        SELECT
+            id,
+            amount,
+            wallet_address,
+            network,
+            status,
+            tx_hash,
+            created_at
         FROM withdrawals
         WHERE telegram_id = %s
         ORDER BY created_at DESC
@@ -978,21 +1318,30 @@ def withdrawal_history(x_telegram_init_data: str = Header(default="")):
     """, (user["telegram_id"],))
 
     rows = cur.fetchall()
+
     cur.close()
     conn.close()
 
-    return {"withdrawals": [
-        {
-            **dict(row),
-            "created_at": row["created_at"].isoformat()
-        } for row in rows
-    ]}
+    return {
+        "withdrawals": [
+            {
+                **dict(row),
+                "created_at": row["created_at"].isoformat()
+            }
+            for row in rows
+        ]
+    }
 
 
-# ---------------- ADMIN ----------------
+# ==================================================
+# ADMIN WITHDRAWAL MANAGEMENT
+# ==================================================
 
 @app.get("/api/admin/withdrawals")
-def admin_withdrawals(x_telegram_init_data: str = Header(default="")):
+def admin_withdrawals(
+    x_telegram_init_data: str = Header(default="")
+):
+
     user = current_user(x_telegram_init_data)
     require_admin(user["telegram_id"])
 
@@ -1000,39 +1349,37 @@ def admin_withdrawals(x_telegram_init_data: str = Header(default="")):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT * FROM withdrawals
+        SELECT *
+        FROM withdrawals
         WHERE status = 'pending'
         ORDER BY created_at ASC
     """)
 
     rows = cur.fetchall()
+
     cur.close()
     conn.close()
 
-    return {"withdrawals": [
-        {**dict(row), "created_at": row["created_at"].isoformat()}
-        for row in rows
-    ]}
+    return {
+        "withdrawals": [
+            {
+                **dict(row),
+                "created_at": row["created_at"].isoformat()
+            }
+            for row in rows
+        ]
+    }
 
 
 @app.post("/api/admin/withdrawals/{withdrawal_id}/approve")
 def approve_withdrawal(
     withdrawal_id: int,
-    request: Request,
+    body: ApproveBody,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
     require_admin(user["telegram_id"])
-
-    body = {}
-    try:
-        body = request.json()
-        if hasattr(body, "__await__"):
-            body = {}
-    except Exception:
-        body = {}
-
-    tx_hash = ""
 
     conn = db()
     cur = conn.cursor()
@@ -1042,9 +1389,13 @@ def approve_withdrawal(
         SET status = 'approved',
             tx_hash = %s,
             processed_at = NOW()
-        WHERE id = %s AND status = 'pending'
+        WHERE id = %s
+        AND status = 'pending'
         RETURNING id
-    """, (tx_hash, withdrawal_id))
+    """, (
+        body.tx_hash,
+        withdrawal_id
+    ))
 
     result = cur.fetchone()
 
@@ -1052,13 +1403,19 @@ def approve_withdrawal(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(404, "Pending withdrawal not found")
+        raise HTTPException(
+            404,
+            "Pending withdrawal not found"
+        )
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return {"success": True, "status": "approved"}
+    return {
+        "success": True,
+        "status": "approved"
+    }
 
 
 @app.post("/api/admin/withdrawals/{withdrawal_id}/reject")
@@ -1066,6 +1423,7 @@ def reject_withdrawal(
     withdrawal_id: int,
     x_telegram_init_data: str = Header(default="")
 ):
+
     user = current_user(x_telegram_init_data)
     require_admin(user["telegram_id"])
 
@@ -1073,8 +1431,10 @@ def reject_withdrawal(
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT telegram_id, amount FROM withdrawals
-        WHERE id = %s AND status = 'pending'
+        SELECT telegram_id, amount
+        FROM withdrawals
+        WHERE id = %s
+        AND status = 'pending'
         FOR UPDATE
     """, (withdrawal_id,))
 
@@ -1084,21 +1444,37 @@ def reject_withdrawal(
         conn.rollback()
         cur.close()
         conn.close()
-        raise HTTPException(404, "Pending withdrawal not found")
+        raise HTTPException(
+            404,
+            "Pending withdrawal not found"
+        )
 
     cur.execute("""
-        UPDATE withdrawals SET status = 'rejected',
+        UPDATE withdrawals
+        SET status = 'rejected',
             processed_at = NOW()
         WHERE id = %s
     """, (withdrawal_id,))
 
     cur.execute("""
-        UPDATE users SET balance = balance + %s
+        UPDATE users
+        SET balance = balance + %s
         WHERE telegram_id = %s
-    """, (row["amount"], row["telegram_id"]))
+    """, (
+        row["amount"],
+        row["telegram_id"]
+    ))
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return {"success": True, "status": "rejected"}
+    return {
+        "success": True,
+        "status": "rejected"
+    }
+
+
+# ==================================================
+# END
+# ==================================================
