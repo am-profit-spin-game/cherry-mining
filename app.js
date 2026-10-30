@@ -1,4 +1,3 @@
-
 "use strict";
 
 /* =========================================
@@ -220,50 +219,7 @@
 
 
     /* =====================================
-       BALANCE
-       ===================================== */
-
-    function updateBalance(balance) {
-
-        const amount = Number(balance || 0);
-
-        setText("balance", formatNumber(amount) + " 🍒");
-
-        setText("usdBalance", usdValue(amount));
-
-        setText("withdrawBalance", formatNumber(amount) + " Cherry");
-
-        setText("withdrawUSD", usdValue(amount));
-
-        setText("profileBalance", formatNumber(amount));
-
-        updateWithdrawPreview();
-
-    }
-
-
-    function updateWithdrawPreview() {
-
-        const amount = Number(
-            $("withdrawAmount")?.value || 0
-        );
-
-        setText(
-            "withdrawPreview",
-            "$" + usdValue(amount)
-        );
-
-    }
-
-
-    $("withdrawAmount")?.addEventListener(
-        "input",
-        updateWithdrawPreview
-    );
-
-
-    /* =====================================
-       LOAD USER DATA
+       REFRESH USER DATA
        ===================================== */
 
     async function refreshUser() {
@@ -274,10 +230,23 @@
 
             userData = data;
 
-            updateBalance(data.balance);
+            setText(
+                "balance",
+                formatNumber(data.balance)
+            );
 
             setText(
-                "refCount",
+                "usdBalance",
+                "$" + usdValue(data.balance)
+            );
+
+            setText(
+                "miningReward",
+                formatNumber(data.mining_reward)
+            );
+
+            setText(
+                "referralCount",
                 formatNumber(data.referral_count)
             );
 
@@ -287,72 +256,38 @@
             );
 
             setText(
+                "walletAddress",
+                data.wallet_address || "Not connected"
+            );
+
+            setText(
                 "miningStatus",
-                data.mining_active ? "Active" : "Inactive"
+                data.mining_ready
+                    ? "Ready to claim"
+                    : data.mining_end_at
+                        ? "Mining in progress"
+                        : "Not started"
             );
 
             setText(
-                "miningReward",
-                formatNumber(data.mining_reward || 0) + " Cherry"
+                "dailyReward",
+                formatNumber(data.daily_reward)
             );
 
-            setText(
-                "verificationStatus",
-                data.verified ? "Verified" : "Unverified"
+            setValue(
+                "referralLink",
+                data.referral_link || ""
             );
 
-            setText(
-                "profileVerifyStatus",
-                data.verified ? "Verified" : "Not Verified"
-            );
+            updateMiningUI(data);
 
-            if (data.wallet_address) {
+            updateDailyUI(data);
 
-                setValue("profileWallet", data.wallet_address);
-
-                setValue("withdrawWallet", data.wallet_address);
-
-            }
-
-            if (data.referral_link) {
-
-                setValue("referralLink", data.referral_link);
-
-            } else {
-
-                const link =
-                    "https://t.me/" +
-                    BOT_USERNAME +
-                    "?start=" +
-                    (telegramUser?.id || "");
-
-                setValue("referralLink", link);
-
-            }
-
-            if (data.mining_end_at) {
-                startCountdown(
-                    "miningCountdown",
-                    data.mining_end_at
-                );
-            }
-
-            if (data.daily_next_at) {
-                startCountdown(
-                    "dailyCountdown",
-                    data.daily_next_at
-                );
-            }
+            updateWithdrawPreview();
 
         } catch (error) {
 
-            console.error("User API:", error);
-
-            message(
-                "miningMessage",
-                error.message,
-                "error"
-            );
+            console.error("Refresh user error:", error);
 
         }
 
@@ -360,65 +295,102 @@
 
 
     /* =====================================
-       COUNTDOWN
+       MINING UI
        ===================================== */
 
-    function startCountdown(elementId, targetTime) {
+    function updateMiningUI(data) {
 
-        const element = $(elementId);
+        const startButton = $("startMining");
+        const claimButton = $("claimMining");
 
-        if (!element) return;
+        if (data.mining_ready) {
+
+            if (startButton) startButton.disabled = true;
+            if (claimButton) claimButton.disabled = false;
+
+        } else if (data.mining_end_at) {
+
+            if (startButton) startButton.disabled = true;
+            if (claimButton) claimButton.disabled = true;
+
+        } else {
+
+            if (startButton) startButton.disabled = false;
+            if (claimButton) claimButton.disabled = true;
+
+        }
+
+        if (data.mining_end_at && !data.mining_ready) {
+            startCountdown(data.mining_end_at);
+        } else {
+            stopCountdown();
+        }
+
+    }
+
+
+    function startCountdown(endAt) {
+
+        stopCountdown();
+
+        const endTime = new Date(endAt).getTime();
 
         function update() {
 
-            const target = new Date(targetTime).getTime();
-
-            const now = Date.now();
-
-            let difference = Math.max(0, target - now);
-
-            if (difference <= 0) {
-
-                element.textContent = "Available Now";
-
-                clearInterval(countdownTimer);
-
-                refreshUser();
-
-                return;
-
-            }
+            const remaining = Math.max(
+                0,
+                endTime - Date.now()
+            );
 
             const hours = Math.floor(
-                difference / 3600000
+                remaining / 3600000
             );
 
             const minutes = Math.floor(
-                (difference % 3600000) / 60000
+                (remaining % 3600000) / 60000
             );
 
             const seconds = Math.floor(
-                (difference % 60000) / 1000
+                (remaining % 60000) / 1000
             );
 
-            element.textContent =
-                String(hours).padStart(2, "0") + ":" +
-                String(minutes).padStart(2, "0") + ":" +
-                String(seconds).padStart(2, "0");
+            setText(
+                "miningTimer",
+                `${hours}h ${minutes}m ${seconds}s`
+            );
+
+            if (remaining <= 0) {
+
+                stopCountdown();
+
+                refreshUser();
+
+            }
 
         }
 
         update();
-
-        clearInterval(countdownTimer);
 
         countdownTimer = setInterval(update, 1000);
 
     }
 
 
+    function stopCountdown() {
+
+        if (countdownTimer) {
+
+            clearInterval(countdownTimer);
+
+            countdownTimer = null;
+
+        }
+
+    }
+
+
     /* =====================================
-       MINING START
+       START MINING
        ===================================== */
 
     $("startMining")?.addEventListener("click", async () => {
@@ -436,7 +408,7 @@
 
             message(
                 "miningMessage",
-                data.message || "Mining started successfully.",
+                "Mining started successfully!",
                 "success"
             );
 
@@ -450,8 +422,6 @@
                 "error"
             );
 
-        } finally {
-
             button.disabled = false;
 
         }
@@ -460,7 +430,7 @@
 
 
     /* =====================================
-       MINING CLAIM
+       CLAIM MINING
        ===================================== */
 
     $("claimMining")?.addEventListener("click", async () => {
@@ -478,7 +448,7 @@
 
             message(
                 "miningMessage",
-                data.message || "Mining reward claimed.",
+                formatNumber(data.reward) + " Cherry claimed!",
                 "success"
             );
 
@@ -492,13 +462,36 @@
                 "error"
             );
 
-        } finally {
-
             button.disabled = false;
 
         }
 
     });
+
+
+    /* =====================================
+       DAILY UI
+       ===================================== */
+
+    function updateDailyUI(data) {
+
+        const button = $("dailyBonus");
+
+        if (!button) return;
+
+        if (!data.daily_next_at) {
+
+            button.disabled = false;
+
+            return;
+
+        }
+
+        const next = new Date(data.daily_next_at).getTime();
+
+        button.disabled = next > Date.now();
+
+    }
 
 
     /* =====================================
@@ -592,7 +585,7 @@
                 button.className = "task-btn";
 
                 button.textContent =
-                    task.completed ? "COMPLETED" : "START";
+                    task.completed ? "COMPLETED" : "WATCH AD & EARN";
 
                 button.disabled = !!task.completed;
 
@@ -630,89 +623,69 @@
 
 
     /* =====================================
-       COMPLETE TASK
+       REWARDED TASK HELPER
        ===================================== */
 
-    async function completeTask(taskId, button) {
+    async function runRewardedTask(
+        taskId,
+        button,
+        statusElement = "dailyMessage"
+    ) {
 
-        button.disabled = true;
-
-        try {
-
-            const data = await api(
-                "/api/tasks/" + encodeURIComponent(taskId) + "/complete",
-                "POST"
-            );
-
-            message(
-                "dailyMessage",
-                data.message || "Task completed.",
-                "success"
-            );
-
-            await refreshUser();
-
-            await loadTasks();
-
-        } catch (error) {
-
-            message(
-                "dailyMessage",
-                error.message,
-                "error"
-            );
-
-            button.disabled = false;
-
-        }
-
-    }
-
-
-    /* =====================================
-       MONETAG REWARDED ADS
-       ===================================== */
-
-    $("watchAd")?.addEventListener("click", async () => {
-
-        const button = $("watchAd");
-
-        button.disabled = true;
+        if (button) button.disabled = true;
 
         message(
-            "adMessage",
+            statusElement,
             "Preparing rewarded advertisement..."
         );
 
         try {
 
-            // Create a server-side reward session first.
+            // Create a unique server-side session for this task.
             const session = await api(
-                "/api/ads/session",
+                "/api/ads/session?task_id=" +
+                encodeURIComponent(taskId),
                 "POST"
             );
 
+            if (!session.session_id || !session.ymid) {
+
+                throw new Error(
+                    "Could not create an advertisement session."
+                );
+
+            }
+
+            // Check Monetag SDK.
             if (
                 typeof window.show_12152538 !== "function"
             ) {
 
                 throw new Error(
-                    "Monetag SDK is unavailable."
+                    "Monetag SDK is unavailable. Please refresh the app."
                 );
 
             }
 
-            await window.show_12152538();
-
             message(
-                "adMessage",
-                "Ad session ended. Waiting for server reward verification."
+                statusElement,
+                "Advertisement is starting..."
             );
 
-            // Poll server. Browser never credits the reward.
+            // Pass unique ymid to Monetag.
+            await window.show_12152538({
+                ymid: session.ymid
+            });
+
+            message(
+                statusElement,
+                "Advertisement ended. Verifying with server..."
+            );
+
             let verified = false;
 
-            for (let attempt = 0; attempt < 12; attempt++) {
+            // Wait up to two minutes for Monetag postback.
+            for (let attempt = 0; attempt < 24; attempt++) {
 
                 await new Promise(resolve =>
                     setTimeout(resolve, 5000)
@@ -727,14 +700,6 @@
 
                     verified = true;
 
-                    message(
-                        "adMessage",
-                        "Advertisement reward verified successfully!",
-                        "success"
-                    );
-
-                    await refreshUser();
-
                     break;
 
                 }
@@ -742,7 +707,15 @@
                 if (result.status === "rejected") {
 
                     throw new Error(
-                        "Advertisement reward was not verified."
+                        "Monetag did not value this advertisement. No reward was added."
+                    );
+
+                }
+
+                if (result.status === "claimed") {
+
+                    throw new Error(
+                        "This advertisement session has already been claimed."
                     );
 
                 }
@@ -752,25 +725,88 @@
             if (!verified) {
 
                 message(
-                    "adMessage",
-                    "Verification is still pending. Please check again later."
+                    statusElement,
+                    "Verification is still pending. Please try again later."
                 );
+
+                return;
 
             }
 
-        } catch (error) {
+            // Server checks valued session and credits reward once.
+            const claim = await api(
+                "/api/tasks/" +
+                encodeURIComponent(taskId) +
+                "/complete",
+                "POST",
+                {
+                    session_id: session.session_id
+                }
+            );
 
             message(
-                "adMessage",
-                error.message,
+                statusElement,
+                "Success! " +
+                formatNumber(claim.reward) +
+                " Cherry added to your balance.",
+                "success"
+            );
+
+            await refreshUser();
+
+            await loadTasks();
+
+        } catch (error) {
+
+            console.error(
+                "Rewarded task error:",
+                error
+            );
+
+            message(
+                statusElement,
+                error.message || "Advertisement task failed.",
                 "error"
             );
 
         } finally {
 
-            button.disabled = false;
+            if (button) button.disabled = false;
 
         }
+
+    }
+
+
+    /* =====================================
+       COMPLETE TASK
+       ===================================== */
+
+    async function completeTask(taskId, button) {
+
+        await runRewardedTask(
+            taskId,
+            button,
+            "dailyMessage"
+        );
+
+    }
+
+
+    /* =====================================
+       MONETAG REWARDED ADS BUTTON
+       ===================================== */
+
+    $("watchAd")?.addEventListener("click", async () => {
+
+        const button = $("watchAd");
+
+        // Standalone Watch Ad button uses task 1.
+        await runRewardedTask(
+            1,
+            button,
+            "adMessage"
+        );
 
     });
 
@@ -791,17 +827,15 @@
 
             message(
                 "referralMessage",
-                "Referral link copied successfully.",
+                "Referral link copied!",
                 "success"
             );
 
         } catch (error) {
-
-            $("referralLink").select();
 
             message(
                 "referralMessage",
-                "Select and copy your referral link.",
+                "Could not copy referral link.",
                 "error"
             );
 
@@ -810,175 +844,64 @@
     });
 
 
-    $("shareReferral")?.addEventListener("click", () => {
+    /* =====================================
+       REFERRAL CLAIM
+       ===================================== */
 
-        const link = $("referralLink")?.value;
+    async function claimReferral() {
 
-        if (!link) return;
-
-        const text = encodeURIComponent(
-            "Join Cherry Mining using my referral link: " + link
+        const params = new URLSearchParams(
+            window.location.search
         );
 
-        const shareUrl =
-            "https://t.me/share/url?url=" +
-            encodeURIComponent(link) +
-            "&text=" + text;
+        const startParam = params.get("start");
 
-        tg?.openTelegramLink(shareUrl);
-
-    });
-
-
-    /* =====================================
-       SAVE WALLET
-       ===================================== */
-
-    $("saveWallet")?.addEventListener("click", async () => {
-
-        const wallet = $("profileWallet")?.value.trim();
-
-        if (!/^0x[a-fA-F0-9]{40}$/.test(wallet || "")) {
-
-            message(
-                "walletMessage",
-                "Please enter a valid BEP20 wallet address.",
-                "error"
-            );
-
-            return;
-
-        }
-
-        const button = $("saveWallet");
-
-        button.disabled = true;
+        if (!startParam) return;
 
         try {
 
-            const data = await api(
-                "/api/wallet",
-                "POST",
-                {
-                    address: wallet
-                }
-            );
-
-            setValue("withdrawWallet", wallet);
-
-            message(
-                "walletMessage",
-                data.message || "Wallet saved successfully.",
-                "success"
+            await api(
+                "/api/referral/claim?start=" +
+                encodeURIComponent(startParam),
+                "POST"
             );
 
         } catch (error) {
 
-            message(
-                "walletMessage",
-                error.message,
-                "error"
+            console.log(
+                "Referral:",
+                error.message
             );
-
-        } finally {
-
-            button.disabled = false;
 
         }
 
-    });
+    }
 
 
     /* =====================================
-       WALLET OWNERSHIP VERIFICATION
+       WITHDRAW PREVIEW
        ===================================== */
 
-    $("verifyWallet")?.addEventListener("click", async () => {
+    function updateWithdrawPreview() {
 
-        const button = $("verifyWallet");
+        const amountInput = $("withdrawAmount");
 
-        if (!window.ethereum) {
+        if (!amountInput) return;
 
-            message(
-                "verifyMessage",
-                "A compatible Web3 wallet is required for signature verification.",
-                "error"
-            );
+        const amount = Number(amountInput.value || 0);
 
-            return;
+        setText(
+            "withdrawUsd",
+            "$" + usdValue(amount)
+        );
 
-        }
+        setText(
+            "withdrawBalance",
+            formatNumber(userData?.balance || 0)
+        );
 
-        button.disabled = true;
+    }
 
-        try {
-
-            const accounts = await window.ethereum.request({
-                method: "eth_requestAccounts"
-            });
-
-            const wallet = accounts[0];
-
-            if (!wallet) {
-
-                throw new Error("Wallet connection failed.");
-
-            }
-
-            const challenge = await api(
-                "/api/wallet/verification/challenge",
-                "POST",
-                {
-                    address: wallet
-                }
-            );
-
-            const signature = await window.ethereum.request({
-                method: "personal_sign",
-                params: [
-                    challenge.message,
-                    wallet
-                ]
-            });
-
-            const result = await api(
-                "/api/wallet/verification/confirm",
-                "POST",
-                {
-                    address: wallet,
-                    message: challenge.message,
-                    signature: signature
-                }
-            );
-
-            message(
-                "verifyMessage",
-                result.message || "Wallet ownership verified.",
-                "success"
-            );
-
-            await refreshUser();
-
-        } catch (error) {
-
-            message(
-                "verifyMessage",
-                error.message,
-                "error"
-            );
-
-        } finally {
-
-            button.disabled = false;
-
-        }
-
-    });
-
-
-    /* =====================================
-       WITHDRAWAL PREVIEW
-       ===================================== */
 
     $("withdrawAmount")?.addEventListener(
         "input",
@@ -987,83 +910,51 @@
 
 
     /* =====================================
-       SUBMIT WITHDRAWAL
+       SAVE WALLET
        ===================================== */
 
-    $("submitWithdrawal")?.addEventListener("click", async () => {
+    $("saveWallet")?.addEventListener("click", async () => {
 
-        const button = $("submitWithdrawal");
+        const button = $("saveWallet");
 
-        const amount = Number(
-            $("withdrawAmount")?.value
-        );
+        const address = $("walletInput")?.value?.trim();
 
-        const wallet = $("withdrawWallet")?.value.trim();
-
-        if (!Number.isSafeInteger(amount) || amount < MIN_WITHDRAW) {
+        if (!address) {
 
             message(
-                "withdrawMessage",
-                "Minimum withdrawal is 10,000 Cherry.",
+                "walletMessage",
+                "Please enter your wallet address.",
                 "error"
             );
 
             return;
 
-        }
-
-        if (!/^0x[a-fA-F0-9]{40}$/.test(wallet || "")) {
-
-            message(
-                "withdrawMessage",
-                "Enter a valid BEP20 wallet address.",
-                "error"
-            );
-
-            return;
-
-        }
-
-        if (!confirm(
-            "Submit withdrawal of " +
-            formatNumber(amount) +
-            " Cherry ($" +
-            usdValue(amount) +
-            ")?"
-        )) {
-            return;
         }
 
         button.disabled = true;
 
         try {
 
-            const data = await api(
-                "/api/withdraw",
+            await api(
+                "/api/wallet",
                 "POST",
                 {
-                    amount: amount,
-                    wallet_address: wallet,
-                    network: "BEP20"
+                    address
                 }
             );
 
             message(
-                "withdrawMessage",
-                data.message || "Withdrawal request submitted for admin approval.",
+                "walletMessage",
+                "Wallet saved successfully.",
                 "success"
             );
 
-            setValue("withdrawAmount", "");
-
             await refreshUser();
-
-            await loadWithdrawals();
 
         } catch (error) {
 
             message(
-                "withdrawMessage",
+                "walletMessage",
                 error.message,
                 "error"
             );
@@ -1078,12 +969,74 @@
 
 
     /* =====================================
-       WITHDRAWAL HISTORY
+       WALLET VERIFICATION
+       ===================================== */
+
+    $("verifyWallet")?.addEventListener("click", async () => {
+
+        const button = $("verifyWallet");
+
+        const address = $("walletInput")?.value?.trim();
+
+        if (!address) {
+
+            message(
+                "walletMessage",
+                "Enter your wallet address first.",
+                "error"
+            );
+
+            return;
+
+        }
+
+        button.disabled = true;
+
+        try {
+
+            const challenge = await api(
+                "/api/wallet/verification/challenge",
+                "POST",
+                {
+                    address
+                }
+            );
+
+            setText(
+                "walletChallenge",
+                challenge.message
+            );
+
+            message(
+                "walletMessage",
+                "Sign the verification message in your wallet.",
+                "success"
+            );
+
+        } catch (error) {
+
+            message(
+                "walletMessage",
+                error.message,
+                "error"
+            );
+
+        } finally {
+
+            button.disabled = false;
+
+        }
+
+    });
+
+
+    /* =====================================
+       LOAD WITHDRAWALS
        ===================================== */
 
     async function loadWithdrawals() {
 
-        const container = $("withdrawHistory");
+        const container = $("withdrawalList");
 
         if (!container) return;
 
@@ -1091,20 +1044,9 @@
 
             const data = await api("/api/withdrawals");
 
-            const items = data.withdrawals || [];
-
             container.innerHTML = "";
 
-            if (!items.length) {
-
-                container.textContent =
-                    "No withdrawal history available.";
-
-                return;
-
-            }
-
-            items.forEach(item => {
+            (data.withdrawals || []).forEach(item => {
 
                 const row = document.createElement("div");
 
@@ -1142,6 +1084,89 @@
         }
 
     }
+
+
+    /* =====================================
+       CREATE WITHDRAWAL
+       ===================================== */
+
+    $("withdrawButton")?.addEventListener("click", async () => {
+
+        const button = $("withdrawButton");
+
+        const amount = Number(
+            $("withdrawAmount")?.value || 0
+        );
+
+        const walletAddress = (
+            $("walletInput")?.value ||
+            userData?.wallet_address ||
+            ""
+        ).trim();
+
+        if (!amount || amount < MIN_WITHDRAW) {
+
+            message(
+                "withdrawMessage",
+                "Minimum withdrawal is 10,000 Cherry.",
+                "error"
+            );
+
+            return;
+
+        }
+
+        if (!walletAddress) {
+
+            message(
+                "withdrawMessage",
+                "Please save your wallet address first.",
+                "error"
+            );
+
+            return;
+
+        }
+
+        button.disabled = true;
+
+        try {
+
+            const data = await api(
+                "/api/withdraw",
+                "POST",
+                {
+                    amount,
+                    wallet_address: walletAddress,
+                    network: "BEP20"
+                }
+            );
+
+            message(
+                "withdrawMessage",
+                "Withdrawal request submitted successfully.",
+                "success"
+            );
+
+            await refreshUser();
+
+            await loadWithdrawals();
+
+        } catch (error) {
+
+            message(
+                "withdrawMessage",
+                error.message,
+                "error"
+            );
+
+        } finally {
+
+            button.disabled = false;
+
+        }
+
+    });
 
 
     /* =====================================
@@ -1207,6 +1232,8 @@
         showPage("homePage");
 
         await refreshUser();
+
+        await claimReferral();
 
     }
 
