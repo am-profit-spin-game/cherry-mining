@@ -1,18 +1,103 @@
-<!doctype html>
-<html lang="bn">
+
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#09070c"><title>Cherry Mining 🍒</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="//libtl.com/sdk.js" data-zone="12152538" data-sdk="show_12152538"></script>
-<link rel="stylesheet" href="/static/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cherry Mining 🍒</title>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Monetag SDK -->
+  <script src="//libtl.com/sdk.js"
+    data-zone="12152538"
+    data-sdk="show_12152538"></script>
+
+  <link rel="stylesheet" href="/static/style.css">
 </head>
-<body><main class="app">
-<header><strong>🍒 Cherry Mining</strong><span class="tag">BETA</span></header>
-<section class="hero"><div class="logo">🍒</div><h1>Cherry Mining</h1><p>Mine • Collect • Complete Tasks</p></section>
-<section class="card balance"><small>Your Cherry Balance</small><div class="amount" id="balance">— <span>Cherry</span></div><small>10,000 Cherry = $1.00</small></section>
-<section class="card"><div class="row"><h2>⛏️ Mining</h2><span class="status">● 500 Cherry / day</span></div><p>Mining চালু করুন। Claim reward এখন নিরাপদ server-side ad verification যুক্ত না হওয়া পর্যন্ত বন্ধ থাকবে।</p><button id="startMining">Start Mining</button><button id="claimMining" class="secondary" disabled>Claim (verification pending)</button><p id="miningStatus" class="notice"></p></section>
-<section class="card"><div class="row"><h2>▶ Watch Ad</h2><span class="tag">Monetag</span></div><div class="reward">+100 Cherry</div><div class="timer" id="timer">24:00:00</div><p>প্রতি ২৪ ঘণ্টায় একবার। Provider-side verification না হওয়া পর্যন্ত reward credit হবে না।</p><button id="watchAd" class="secondary">Watch Ad</button><p id="adStatus" class="notice"></p></section>
-<section class="card"><div class="row"><h2>🎯 Task Center</h2><span class="tag">10 Tasks</span></div><div id="tasks">Telegram Mini App থেকে খুললে টাস্ক লোড হবে।</div></section>
-<footer>Cherry Mining • Points are not cryptocurrency mining.</footer>
-</main><script src="/static/app.js"></script></body></html>
+<body>
+
+<header class="topbar">
+  <div class="brand">🍒 Cherry Mining</div>
+  <div class="user">👤 <span id="username">User</span></div>
+</header>
+
+<main class="container">
+
+  <section class="balance-card">
+    <p>Your Total Balance</p>
+    <h1><span id="balance">0</span> 🍒</h1>
+    <small>10,000 Cherry = $1.00 (reference only)</small>
+  </section>
+
+  <section class="card mining">
+    <h2>⛏️ Mining Center</h2>
+    <div class="mining-circle">🍒</div>
+    <h3>500 Cherry / Day</h3>
+    <p>Mining rewards are calculated by the server.</p>
+    <button id="startMining" class="primary">START MINING</button>
+    <button id="claimMining" class="secondary" disabled>
+      CLAIM REWARD
+    </button>
+    <p id="miningStatus">Mining not started</p>
+  </section>
+
+  <section class="card">
+    <h2>🎁 Daily Check-in</h2>
+    <p>Daily bonus: 100 Cherry</p>
+    <button id="dailyBonus" class="primary">
+      CLAIM DAILY BONUS
+    </button>
+    <p id="dailyStatus"></p>
+  </section>
+
+  <section class="card">
+    <h2>📺 Monetag Tasks</h2>
+    <p>Watch an available advertisement.</p>
+    <button id="watchAd" class="primary">
+      WATCH AD
+    </button>
+    <p id="adStatus"></p>
+  </section>
+
+  <section class="card" id="tasks">
+    <h2>📋 Tasks</h2>
+    <div class="task"><span>Join Telegram Community</span><span>100 🍒</span></div>
+    <div class="task"><span>Follow Community Updates</span><span>100 🍒</span></div>
+    <div class="task"><span>Daily Check-in</span><span>100 🍒</span></div>
+    <div class="task"><span>Watch Monetag Ad</span><span>100 🍒</span></div>
+    <div class="task"><span>Invite a Friend</span><span>1,000 🍒</span></div>
+    <div class="task"><span>Read App Rules</span><span>50 🍒</span></div>
+    <div class="task"><span>Visit Project Page</span><span>50 🍒</span></div>
+    <div class="task"><span>Complete Profile</span><span>50 🍒</span></div>
+    <div class="task"><span>Community Activity</span><span>50 🍒</span></div>
+    <div class="task"><span>Explore Cherry Mining</span><span>50 🍒</span></div>
+  </section>
+
+  <section class="card" id="refLink">
+    <h2>👥 Referral</h2>
+    <p>Invite friends to Cherry Mining.</p>
+    <h3>Referral Count: <span id="refCount">0</span></h3>
+    <input id="referralLink" readonly value="Loading referral link...">
+    <button class="secondary" id="copyReferral">COPY LINK</button>
+  </section>
+
+  <section class="card">
+    <h2>💰 Wallet</h2>
+    <h3><span id="walletBalance">0</span> 🍒</h3>
+    <p>Minimum demo withdrawal threshold: 10,000 Cherry.</p>
+    <button class="secondary" disabled>WITHDRAW (DEMO)</button>
+    <small>Points are demo-only and are not cash or cryptocurrency.</small>
+  </section>
+
+</main>
+
+<nav class="bottom-nav">
+  <a href="#">🏠 Home</a>
+  <a href="#tasks">📋 Tasks</a>
+  <a href="#refLink">👥 Referral</a>
+</nav>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
