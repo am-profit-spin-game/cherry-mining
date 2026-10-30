@@ -1,136 +1,162 @@
-"use strict";
-
-/* =========================================
-   CHERRY MINING - FRONTEND CONTROLLER
-   ========================================= */
 
 (() => {
+    "use strict";
+
+    // ==========================================
+    // CHERRY MINING - FRONTEND APP
+    // ==========================================
 
     const tg = window.Telegram?.WebApp;
 
     tg?.ready();
     tg?.expand();
 
-    const BOT_USERNAME = "CherryMiningBot";
-    const API_BASE = "";
+    const $ = (id) => document.getElementById(id);
 
-    const RATE = 10000;
-    const MIN_WITHDRAW = 10000;
+    const API_HEADERS = {
+        "Content-Type": "application/json"
+    };
 
-    const $ = id => document.getElementById(id);
+    if (tg?.initData) {
+        API_HEADERS["X-Telegram-Init-Data"] = tg.initData;
+    }
 
-    let userData = null;
-    let taskData = [];
-    let countdownTimer = null;
+    const state = {
+        user: null,
+        joined: false,
+        mining: null,
+        miningSyncTime: Date.now(),
+        miningBaseEarned: 0,
+        miningTimer: null,
+        busy: false,
+        tasks: [],
+        referrals: [],
+        withdrawals: [],
+        adBusy: false
+    };
 
+    // ==========================================
+    // HELPERS
+    // ==========================================
 
-    /* =====================================
-       API HELPER
-       ===================================== */
+    function setText(id, value) {
+        const el = $(id);
+        if (el) el.textContent = value ?? "";
+    }
+
+    function showStatus(id, message, error = false) {
+        const el = $(id);
+        if (!el) return;
+
+        el.textContent = message;
+        el.style.color = error ? "#ff8b9d" : "#ffb4d2";
+    }
+
+    function formatCherry(value) {
+        const number = Number(value || 0);
+
+        return number.toLocaleString("en-US", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 8
+        });
+    }
+
+    function formatUSD(value) {
+        return "$" + Number(value || 0).toFixed(4);
+    }
+
+    function formatDate(value) {
+        if (!value) return "N/A";
+
+        const date = new Date(value);
+
+        if (Number.isNaN(date.getTime())) return "N/A";
+
+        return date.toLocaleString();
+    }
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function escapeHTML(value) {
+        return String(value ?? "").replace(/[&<>"']/g, char => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#039;"
+        })[char]);
+    }
+
+    // ==========================================
+    // API CONNECTION
+    // ==========================================
 
     async function api(path, method = "GET", body = null) {
-
-        const headers = {
-            "Content-Type": "application/json"
-        };
-
-        if (tg?.initData) {
-            headers["X-Telegram-Init-Data"] = tg.initData;
-        }
-
         const options = {
             method,
-            headers
+            headers: { ...API_HEADERS }
         };
 
         if (body !== null) {
             options.body = JSON.stringify(body);
         }
 
-        const response = await fetch(API_BASE + path, options);
+        let response;
 
-        const data = await response.json().catch(() => ({}));
+        try {
+            response = await fetch(path, options);
+        } catch (error) {
+            throw new Error("Network connection failed. Please try again.");
+        }
+
+        let data = {};
+
+        try {
+            data = await response.json();
+        } catch {
+            data = {};
+        }
 
         if (!response.ok) {
-            throw new Error(
-                data.detail || data.message || "Request failed"
-            );
+            let message = data.detail || data.message || "Something went wrong.";
+
+            if (typeof message !== "string") {
+                message = JSON.stringify(message);
+            }
+
+            throw new Error(message);
         }
 
         return data;
     }
 
+    // ==========================================
+    // TELEGRAM USER
+    // ==========================================
 
-    /* =====================================
-       MESSAGE HELPER
-       ===================================== */
+    function loadTelegramUser() {
+        const user = tg?.initDataUnsafe?.user;
 
-    function message(id, text, type = "") {
-
-        const element = $(id);
-
-        if (!element) return;
-
-        element.textContent = text;
-        element.className = "message";
-
-        if (type) {
-            element.classList.add(type);
+        if (user) {
+            state.user = user;
+            setText("userName", user.first_name || "Telegram User");
+        } else {
+            setText("userName", "Telegram User");
         }
     }
 
-
-    function setText(id, value) {
-
-        const element = $(id);
-
-        if (element) {
-            element.textContent = value ?? "";
-        }
-    }
-
-
-    function setValue(id, value) {
-
-        const element = $(id);
-
-        if (element) {
-            element.value = value ?? "";
-        }
-    }
-
-
-    function formatNumber(value) {
-
-        return Number(value || 0).toLocaleString("en-US", {
-            maximumFractionDigits: 4
-        });
-
-    }
-
-
-    function usdValue(cherry) {
-
-        return (Number(cherry || 0) / RATE).toFixed(4);
-
-    }
-
-
-    /* =====================================
-       NAVIGATION
-       ===================================== */
+    // ==========================================
+    // NAVIGATION
+    // ==========================================
 
     const navButtons = document.querySelectorAll(".nav-btn");
-
     const pages = document.querySelectorAll(".page");
 
     function showPage(pageId) {
-
         pages.forEach(page => {
-            page.classList.toggle(
-                "active",
-                page.id === pageId
-            );
+            page.classList.toggle("active", page.id === pageId);
         });
 
         navButtons.forEach(button => {
@@ -140,1103 +166,1033 @@
             );
         });
 
-        window.scrollTo({
-            top: 0,
-            behavior: "smooth"
-        });
-
-        if (pageId === "tasksPage") {
-            loadTasks();
-        }
-
-        if (pageId === "withdrawPage") {
-            loadWithdrawals();
-            updateWithdrawPreview();
-        }
-
-        if (pageId === "profilePage") {
-            loadProfile();
-        }
-
+        if (pageId === "tasksPage") loadTasks();
+        if (pageId === "referralPage") loadReferrals();
+        if (pageId === "historyPage") loadWithdrawals();
     }
-
 
     navButtons.forEach(button => {
-
         button.addEventListener("click", () => {
-
             showPage(button.dataset.page);
-
         });
-
     });
 
+    // ==========================================
+    // CHANNEL VERIFICATION
+    // ==========================================
 
-    /* =====================================
-       TELEGRAM USER
-       ===================================== */
+    function updateChannelUI(joined) {
+        state.joined = Boolean(joined);
 
-    const telegramUser = tg?.initDataUnsafe?.user;
+        const section = $("channelSection");
+        const miningSection = $("miningSection");
 
-    function loadTelegramUser() {
-
-        if (!telegramUser) {
-            setText("headerUser", "Telegram User");
-            return;
+        if (section) {
+            section.style.display = joined ? "none" : "block";
         }
 
-        const fullName = [
-            telegramUser.first_name,
-            telegramUser.last_name
-        ].filter(Boolean).join(" ");
-
-        setText("headerUser", fullName || "Telegram User");
-
-        setText("profileName", fullName || "Telegram User");
-
-        setText("telegramId", telegramUser.id || "--");
-
-        if (telegramUser.photo_url) {
-
-            const avatar = $("profileAvatar");
-
-            if (avatar) {
-
-                avatar.innerHTML = "";
-
-                const image = document.createElement("img");
-
-                image.src = telegramUser.photo_url;
-                image.alt = "Profile Photo";
-
-                avatar.appendChild(image);
-
-            }
-
+        if (miningSection) {
+            miningSection.style.opacity = joined ? "1" : "0.55";
         }
 
+        setText(
+            "channelStatus",
+            joined
+                ? "Channel membership verified."
+                : "Join our official Telegram channel first."
+        );
     }
 
-
-    /* =====================================
-       REFRESH USER DATA
-       ===================================== */
-
-    async function refreshUser() {
-
+    async function checkChannel() {
         try {
+            const data = await api("/api/channel/status");
 
-            const data = await api("/api/me");
+            const joined =
+                data.joined === true ||
+                data.is_member === true ||
+                data.verified === true;
 
-            userData = data;
+            updateChannelUI(joined);
 
-            setText(
-                "balance",
-                formatNumber(data.balance)
-            );
-
-            setText(
-                "usdBalance",
-                "$" + usdValue(data.balance)
-            );
-
-            setText(
-                "miningReward",
-                formatNumber(data.mining_reward)
-            );
-
-            setText(
-                "referralCount",
-                formatNumber(data.referral_count)
-            );
-
-            setText(
-                "profileReferrals",
-                formatNumber(data.referral_count)
-            );
-
-            setText(
-                "walletAddress",
-                data.wallet_address || "Not connected"
-            );
-
-            setText(
-                "miningStatus",
-                data.mining_ready
-                    ? "Ready to claim"
-                    : data.mining_end_at
-                        ? "Mining in progress"
-                        : "Not started"
-            );
-
-            setText(
-                "dailyReward",
-                formatNumber(data.daily_reward)
-            );
-
-            setValue(
-                "referralLink",
-                data.referral_link || ""
-            );
-
-            updateMiningUI(data);
-
-            updateDailyUI(data);
-
-            updateWithdrawPreview();
-
+            return joined;
         } catch (error) {
-
-            console.error("Refresh user error:", error);
-
+            updateChannelUI(false);
+            return false;
         }
-
     }
 
+    const joinChannel = $("joinChannel");
 
-    /* =====================================
-       MINING UI
-       ===================================== */
+    if (joinChannel) {
+        joinChannel.addEventListener("click", () => {
+            const url = "https://t.me/CherryMiningChannel";
 
-    function updateMiningUI(data) {
+            if (tg?.openTelegramLink) {
+                tg.openTelegramLink(url);
+            } else {
+                window.open(url, "_blank");
+            }
+        });
+    }
+
+    const verifyChannel = $("verifyChannel");
+
+    if (verifyChannel) {
+        verifyChannel.addEventListener("click", async () => {
+            verifyChannel.disabled = true;
+
+            try {
+                const data = await api("/api/channel/verify", "POST");
+
+                if (
+                    data.joined === true ||
+                    data.is_member === true ||
+                    data.verified === true ||
+                    data.success === true
+                ) {
+                    updateChannelUI(true);
+                    showStatus("channelStatus", "Channel verified successfully!");
+
+                    await refreshAll();
+                } else {
+                    updateChannelUI(false);
+                    showStatus(
+                        "channelStatus",
+                        "Channel membership not found. Join first.",
+                        true
+                    );
+                }
+            } catch (error) {
+                showStatus("channelStatus", error.message, true);
+            } finally {
+                verifyChannel.disabled = false;
+            }
+        });
+    }
+
+    // ==========================================
+    // BALANCE
+    // ==========================================
+
+    function updateBalance(data) {
+        setText("balance", formatCherry(data.balance));
+        setText("usdBalance", formatUSD(data.usd_balance));
+    }
+
+    // ==========================================
+    // MINING
+    // ==========================================
+
+    function renderMining(data) {
+        state.mining = data;
+        state.miningSyncTime = Date.now();
+
+        state.miningBaseEarned = Number(
+            data.mining_earned ?? data.earned ?? 0
+        );
+
+        const started = data.mining_started;
+        const ends = data.mining_ends || data.mining_end_at;
+
+        const active = Boolean(
+            data.mining_active || data.active
+        );
+
+        const completed = Boolean(
+            data.mining_completed || data.completed
+        );
+
+        const reward = Number(data.mining_reward || 500);
+
+        const earned = state.miningBaseEarned;
+
+        setText("miningEarned", formatCherry(earned));
+        setText(
+            "miningUsd",
+            formatUSD(data.mining_earned_usd)
+        );
+
+        const progress = Math.min(
+            100,
+            Math.max(0, Number(data.mining_progress || 0))
+        );
+
+        const progressBar = $("miningProgress");
+
+        if (progressBar) {
+            progressBar.style.width = progress + "%";
+        }
+
+        setText(
+            "miningProgressText",
+            progress.toFixed(2) + "%"
+        );
 
         const startButton = $("startMining");
         const claimButton = $("claimMining");
 
-        if (data.mining_ready) {
-
-            if (startButton) startButton.disabled = true;
-            if (claimButton) claimButton.disabled = false;
-
-        } else if (data.mining_end_at) {
-
-            if (startButton) startButton.disabled = true;
-            if (claimButton) claimButton.disabled = true;
-
-        } else {
-
-            if (startButton) startButton.disabled = false;
-            if (claimButton) claimButton.disabled = true;
-
+        if (startButton) {
+            startButton.disabled = active || !state.joined;
         }
 
-        if (data.mining_end_at && !data.mining_ready) {
-            startCountdown(data.mining_end_at);
-        } else {
-            stopCountdown();
+        if (claimButton) {
+            claimButton.disabled = earned <= 0 || !state.joined;
         }
 
+        if (active) {
+            setText("miningStatus", "Mining is active.");
+        } else if (completed && earned > 0) {
+            setText("miningStatus", "Mining completed. Claim your reward.");
+        } else {
+            setText("miningStatus", "Mining is not active.");
+        }
+
+        updateMiningTimer(ends, active, started, reward);
     }
 
+    function updateMiningTimer(ends, active, started, reward) {
+        if (state.miningTimer) {
+            clearInterval(state.miningTimer);
+            state.miningTimer = null;
+        }
 
-    function startCountdown(endAt) {
-
-        stopCountdown();
-
-        const endTime = new Date(endAt).getTime();
-
-        function update() {
-
-            const remaining = Math.max(
-                0,
-                endTime - Date.now()
-            );
-
-            const hours = Math.floor(
-                remaining / 3600000
-            );
-
-            const minutes = Math.floor(
-                (remaining % 3600000) / 60000
-            );
-
-            const seconds = Math.floor(
-                (remaining % 60000) / 1000
-            );
-
-            setText(
-                "miningTimer",
-                `${hours}h ${minutes}m ${seconds}s`
-            );
-
-            if (remaining <= 0) {
-
-                stopCountdown();
-
-                refreshUser();
-
+        function tick() {
+            if (!ends) {
+                setText("miningTimer", "00:00:00");
+                return;
             }
 
+            const endTime = new Date(ends).getTime();
+            const remaining = Math.max(0, endTime - Date.now());
+
+            if (active && remaining > 0) {
+                const totalSeconds = Math.floor(remaining / 1000);
+
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                const seconds = totalSeconds % 60;
+
+                setText(
+                    "miningTimer",
+                    [hours, minutes, seconds]
+                        .map(v => String(v).padStart(2, "0"))
+                        .join(":")
+                );
+
+                const elapsed = Math.max(
+                    0,
+                    (Date.now() - state.miningSyncTime) / 1000
+                );
+
+                const liveEarned = Math.min(
+                    Number(reward || 500),
+                    state.miningBaseEarned +
+                    (elapsed * Number(reward || 500) / 86400)
+                );
+
+                setText("miningEarned", formatCherry(liveEarned));
+
+                const usdRate = Number(
+                    state.mining?.cherry_per_usd || 10000
+                );
+
+                setText(
+                    "miningUsd",
+                    formatUSD(liveEarned / usdRate)
+                );
+
+                const totalDuration = started
+                    ? endTime - new Date(started).getTime()
+                    : 86400000;
+
+                const progress = totalDuration > 0
+                    ? Math.min(
+                        100,
+                        Math.max(
+                            0,
+                            ((Date.now() - new Date(started || Date.now()).getTime()) /
+                                totalDuration) * 100
+                        )
+                    )
+                    : 0;
+
+                const bar = $("miningProgress");
+
+                if (bar) bar.style.width = progress + "%";
+
+                setText(
+                    "miningProgressText",
+                    progress.toFixed(2) + "%"
+                );
+            } else {
+                setText(
+                    "miningTimer",
+                    remaining <= 0 ? "Completed" : "00:00:00"
+                );
+            }
         }
 
-        update();
-
-        countdownTimer = setInterval(update, 1000);
-
+        tick();
+        state.miningTimer = setInterval(tick, 1000);
     }
 
+    async function loadMining() {
+        try {
+            const data = await api("/api/mining/status");
+            renderMining(data);
+        } catch (error) {
+            if (state.mining) {
+                renderMining(state.mining);
+            }
 
-    function stopCountdown() {
-
-        if (countdownTimer) {
-
-            clearInterval(countdownTimer);
-
-            countdownTimer = null;
-
+            showStatus("miningStatus", error.message, true);
         }
-
     }
 
+    const startMining = $("startMining");
 
-    /* =====================================
-       START MINING
-       ===================================== */
+    if (startMining) {
+        startMining.addEventListener("click", async () => {
+            if (!state.joined) {
+                showStatus(
+                    "miningStatus",
+                    "Join the official channel first.",
+                    true
+                );
+                return;
+            }
 
-    $("startMining")?.addEventListener("click", async () => {
+            startMining.disabled = true;
 
-        const button = $("startMining");
+            try {
+                const data = await api("/api/mining/start", "POST");
 
-        button.disabled = true;
+                showStatus(
+                    "miningStatus",
+                    data.message || "Mining started successfully!"
+                );
 
-        try {
-
-            const data = await api(
-                "/api/mining/start",
-                "POST"
-            );
-
-            message(
-                "miningMessage",
-                "Mining started successfully!",
-                "success"
-            );
-
-            await refreshUser();
-
-        } catch (error) {
-
-            message(
-                "miningMessage",
-                error.message,
-                "error"
-            );
-
-            button.disabled = false;
-
-        }
-
-    });
-
-
-    /* =====================================
-       CLAIM MINING
-       ===================================== */
-
-    $("claimMining")?.addEventListener("click", async () => {
-
-        const button = $("claimMining");
-
-        button.disabled = true;
-
-        try {
-
-            const data = await api(
-                "/api/mining/claim",
-                "POST"
-            );
-
-            message(
-                "miningMessage",
-                formatNumber(data.reward) + " Cherry claimed!",
-                "success"
-            );
-
-            await refreshUser();
-
-        } catch (error) {
-
-            message(
-                "miningMessage",
-                error.message,
-                "error"
-            );
-
-            button.disabled = false;
-
-        }
-
-    });
-
-
-    /* =====================================
-       DAILY UI
-       ===================================== */
-
-    function updateDailyUI(data) {
-
-        const button = $("dailyBonus");
-
-        if (!button) return;
-
-        if (!data.daily_next_at) {
-
-            button.disabled = false;
-
-            return;
-
-        }
-
-        const next = new Date(data.daily_next_at).getTime();
-
-        button.disabled = next > Date.now();
-
+                await refreshAll();
+            } catch (error) {
+                showStatus("miningStatus", error.message, true);
+            } finally {
+                startMining.disabled = false;
+            }
+        });
     }
 
+    const claimMining = $("claimMining");
 
-    /* =====================================
-       DAILY CHECK-IN
-       ===================================== */
+    if (claimMining) {
+        claimMining.addEventListener("click", async () => {
+            claimMining.disabled = true;
 
-    $("dailyBonus")?.addEventListener("click", async () => {
+            try {
+                const data = await api("/api/mining/claim", "POST");
 
-        const button = $("dailyBonus");
+                showStatus(
+                    "miningStatus",
+                    data.message || "Mining reward claimed successfully!"
+                );
 
-        button.disabled = true;
+                await refreshAll();
+            } catch (error) {
+                showStatus("miningStatus", error.message, true);
+            } finally {
+                claimMining.disabled = false;
+            }
+        });
+    }
 
+    // ==========================================
+    // DAILY BONUS
+    // ==========================================
+
+    async function updateDailyStatus() {
         try {
+            const data = await api("/api/me");
 
-            const data = await api(
-                "/api/daily/claim",
-                "POST"
+            const next = data.daily_next_at
+                ? new Date(data.daily_next_at).getTime()
+                : 0;
+
+            const available = !next || next <= Date.now();
+
+            const button = $("dailyBonus");
+
+            if (button) {
+                button.disabled = !available;
+            }
+
+            setText(
+                "dailyStatus",
+                available
+                    ? "Your daily bonus is available!"
+                    : "Next bonus: " + formatDate(data.daily_next_at)
             );
-
-            message(
-                "dailyMessage",
-                data.message || "Daily reward claimed successfully.",
-                "success"
-            );
-
-            await refreshUser();
-
         } catch (error) {
-
-            message(
-                "dailyMessage",
-                error.message,
-                "error"
-            );
-
-        } finally {
-
-            button.disabled = false;
-
+            showStatus("dailyStatus", error.message, true);
         }
+    }
 
-    });
+    const dailyBonus = $("dailyBonus");
 
+    if (dailyBonus) {
+        dailyBonus.addEventListener("click", async () => {
+            dailyBonus.disabled = true;
 
-    /* =====================================
-       LOAD TASKS
-       ===================================== */
+            try {
+                const data = await api("/api/daily/claim", "POST");
+
+                showStatus(
+                    "dailyStatus",
+                    data.message || "Daily bonus claimed!"
+                );
+
+                await refreshAll();
+            } catch (error) {
+                showStatus("dailyStatus", error.message, true);
+                dailyBonus.disabled = false;
+            }
+        });
+    }
+
+    // ==========================================
+    // MONETAG TASKS
+    // ==========================================
 
     async function loadTasks() {
-
         const container = $("taskList");
-
         if (!container) return;
 
-        try {
+        container.innerHTML =
+            '<div class="empty-state">Loading tasks...</div>';
 
+        try {
             const data = await api("/api/tasks");
 
-            taskData = data.tasks || [];
+            state.tasks = Array.isArray(data)
+                ? data
+                : (data.tasks || []);
+
+            if (!state.tasks.length) {
+                container.innerHTML =
+                    '<div class="empty-state">No tasks available.</div>';
+                return;
+            }
 
             container.innerHTML = "";
 
-            taskData.forEach(task => {
-
+            state.tasks.forEach(task => {
                 const item = document.createElement("div");
 
                 item.className = "task-item";
 
-                const details = document.createElement("div");
+                const title = escapeHTML(
+                    task.title || `Task ${task.id}`
+                );
 
-                details.className = "task-details";
+                const description = escapeHTML(
+                    task.description || "Complete this task to earn Cherry."
+                );
 
-                const title = document.createElement("h3");
+                const reward = escapeHTML(task.reward ?? 50);
 
-                title.textContent = task.title;
+                const completed = Boolean(
+                    task.completed || task.claimed
+                );
 
-                const description = document.createElement("p");
+                item.innerHTML = `
+                    <h3>${title}</h3>
+                    <p>${description}</p>
+                    <p>Reward: ${reward} Cherry</p>
+                    <button class="primary task-action"
+                        ${completed ? "disabled" : ""}
+                        type="button">
+                        ${completed ? "Completed" : "Start Task"}
+                    </button>
+                    <p class="status task-status"></p>
+                `;
 
-                description.textContent =
-                    task.description || "Complete this daily task.";
+                const button = item.querySelector(".task-action");
+                const status = item.querySelector(".task-status");
 
-                const reward = document.createElement("span");
-
-                reward.className = "task-reward";
-
-                reward.textContent =
-                    formatNumber(task.reward) + " Cherry";
-
-                const button = document.createElement("button");
-
-                button.className = "task-btn";
-
-                button.textContent =
-                    task.completed ? "COMPLETED" : "WATCH AD & EARN";
-
-                button.disabled = !!task.completed;
-
-                button.addEventListener("click", () => {
-                    completeTask(task.id, button);
+                button.addEventListener("click", async () => {
+                    await startAdTask(task, button, status);
                 });
 
-                details.appendChild(title);
-
-                details.appendChild(description);
-
-                item.appendChild(details);
-
-                item.appendChild(reward);
-
-                item.appendChild(button);
-
                 container.appendChild(item);
-
             });
 
-            if (!taskData.length) {
-
-                container.textContent = "No tasks available.";
-
-            }
-
         } catch (error) {
-
-            container.textContent = error.message;
-
+            container.innerHTML = "";
+            showStatus("taskList", error.message, true);
         }
-
     }
 
+    async function startAdTask(task, button, status) {
+        if (state.adBusy) return;
 
-    /* =====================================
-       REWARDED TASK HELPER
-       ===================================== */
+        if (!state.joined) {
+            status.textContent = "Join the official channel first.";
+            return;
+        }
 
-    async function runRewardedTask(
-        taskId,
-        button,
-        statusElement = "dailyMessage"
-    ) {
-
-        if (button) button.disabled = true;
-
-        message(
-            statusElement,
-            "Preparing rewarded advertisement..."
-        );
+        state.adBusy = true;
+        button.disabled = true;
+        button.textContent = "Preparing Ad...";
 
         try {
-
-            // Create a unique server-side session for this task.
             const session = await api(
-                "/api/ads/session?task_id=" +
-                encodeURIComponent(taskId),
+                `/api/ads/session?task_id=${encodeURIComponent(task.id)}`,
                 "POST"
             );
 
-            if (!session.session_id || !session.ymid) {
-
-                throw new Error(
-                    "Could not create an advertisement session."
-                );
-
+            if (!session.session_id) {
+                throw new Error("Ad session could not be created.");
             }
 
-            // Check Monetag SDK.
-            if (
-                typeof window.show_12152538 !== "function"
-            ) {
-
+            if (typeof window.show_12152538 !== "function") {
                 throw new Error(
-                    "Monetag SDK is unavailable. Please refresh the app."
+                    "Monetag SDK is not ready. Please reload and try again."
                 );
-
             }
 
-            message(
-                statusElement,
-                "Advertisement is starting..."
-            );
+            status.textContent = "Please watch the advertisement.";
 
-            // Pass unique ymid to Monetag.
-            await window.show_12152538({
-                ymid: session.ymid
-            });
+            button.textContent = "Advertisement Running...";
 
-            message(
-                statusElement,
-                "Advertisement ended. Verifying with server..."
-            );
+            try {
+                await window.show_12152538({
+                    ymid: session.ymid
+                });
+            } catch (adError) {
+                console.warn("Monetag SDK:", adError);
+            }
+
+            status.textContent =
+                "Waiting for ad verification. Please wait...";
+
+            button.textContent = "Verifying...";
 
             let verified = false;
 
-            // Wait up to two minutes for Monetag postback.
-            for (let attempt = 0; attempt < 24; attempt++) {
-
-                await new Promise(resolve =>
-                    setTimeout(resolve, 5000)
-                );
+            for (let i = 0; i < 45; i++) {
+                await sleep(2000);
 
                 const result = await api(
-                    "/api/ads/session/" +
-                    encodeURIComponent(session.session_id)
+                    `/api/ads/session/${encodeURIComponent(session.session_id)}`
                 );
 
                 if (result.status === "valued") {
-
                     verified = true;
-
                     break;
-
                 }
 
-                if (result.status === "rejected") {
-
+                if (
+                    result.status === "rejected" ||
+                    result.status === "non_valued"
+                ) {
                     throw new Error(
-                        "Monetag did not value this advertisement. No reward was added."
+                        "Advertisement was not approved. Try again later."
                     );
-
                 }
-
-                if (result.status === "claimed") {
-
-                    throw new Error(
-                        "This advertisement session has already been claimed."
-                    );
-
-                }
-
             }
 
             if (!verified) {
-
-                message(
-                    statusElement,
-                    "Verification is still pending. Please try again later."
+                throw new Error(
+                    "Ad verification is still pending. Please try again later."
                 );
-
-                return;
-
             }
 
-            // Server checks valued session and credits reward once.
-            const claim = await api(
-                "/api/tasks/" +
-                encodeURIComponent(taskId) +
-                "/complete",
+            const completed = await api(
+                `/api/tasks/${encodeURIComponent(task.id)}/complete`,
                 "POST",
                 {
                     session_id: session.session_id
                 }
             );
 
-            message(
-                statusElement,
-                "Success! " +
-                formatNumber(claim.reward) +
-                " Cherry added to your balance.",
-                "success"
-            );
+            status.textContent =
+                completed.message || "Task completed successfully!";
 
-            await refreshUser();
+            button.textContent = "Completed";
 
+            await refreshAll();
             await loadTasks();
 
         } catch (error) {
-
-            console.error(
-                "Rewarded task error:",
-                error
-            );
-
-            message(
-                statusElement,
-                error.message || "Advertisement task failed.",
-                "error"
-            );
-
+            status.textContent = error.message;
+            button.disabled = false;
+            button.textContent = "Try Again";
         } finally {
-
-            if (button) button.disabled = false;
-
+            state.adBusy = false;
         }
-
     }
 
+    // ==========================================
+    // WATCH AD BUTTON
+    // ==========================================
 
-    /* =====================================
-       COMPLETE TASK
-       ===================================== */
+    const watchAd = $("watchAd");
 
-    async function completeTask(taskId, button) {
-
-        await runRewardedTask(
-            taskId,
-            button,
-            "dailyMessage"
-        );
-
-    }
-
-
-    /* =====================================
-       MONETAG REWARDED ADS BUTTON
-       ===================================== */
-
-    $("watchAd")?.addEventListener("click", async () => {
-
-        const button = $("watchAd");
-
-        // Standalone Watch Ad button uses task 1.
-        await runRewardedTask(
-            1,
-            button,
-            "adMessage"
-        );
-
-    });
-
-
-    /* =====================================
-       REFERRAL
-       ===================================== */
-
-    $("copyReferral")?.addEventListener("click", async () => {
-
-        const link = $("referralLink")?.value;
-
-        if (!link) return;
-
-        try {
-
-            await navigator.clipboard.writeText(link);
-
-            message(
-                "referralMessage",
-                "Referral link copied!",
-                "success"
+    if (watchAd) {
+        watchAd.addEventListener("click", async () => {
+            showStatus(
+                "adStatus",
+                "Please complete an available task from the Tasks page."
             );
+
+            showPage("tasksPage");
+        });
+    }
+
+    // ==========================================
+    // REFERRAL
+    // ==========================================
+
+    async function loadReferrals() {
+        try {
+            const data = await api("/api/referrals");
+
+            state.referrals = data.referrals || [];
+
+            setText("refCount", data.total_referrals ?? data.referral_count ?? 0);
+
+            setText(
+                "approvedReferrals",
+                data.approved_referrals ?? data.approved ?? 0
+            );
+
+            setText(
+                "pendingReferrals",
+                data.pending_referrals ?? data.pending ?? 0
+            );
+
+            setText(
+                "referralBonus",
+                formatCherry(data.total_bonus ?? data.referral_bonus ?? 0)
+            );
+
+            renderReferralList(state.referrals);
 
         } catch (error) {
+            showStatus("referralList", error.message, true);
+        }
+    }
 
-            message(
-                "referralMessage",
-                "Could not copy referral link.",
-                "error"
-            );
+    function renderReferralList(referrals) {
+        const container = $("referralList");
+        if (!container) return;
 
+        if (!referrals.length) {
+            container.innerHTML =
+                '<div class="empty-state">No referrals yet.</div>';
+            return;
         }
 
-    });
+        container.innerHTML = "";
 
+        referrals.forEach(ref => {
+            const item = document.createElement("div");
 
-    /* =====================================
-       REFERRAL CLAIM
-       ===================================== */
+            item.className = "referral-item";
 
-    async function claimReferral() {
+            const name = escapeHTML(
+                ref.first_name || ref.username || "Telegram User"
+            );
 
-        const params = new URLSearchParams(
-            window.location.search
-        );
+            const status = String(ref.status || "pending").toLowerCase();
 
-        const startParam = params.get("start");
+            const statusLabel = escapeHTML(status);
+
+            item.innerHTML = `
+                <h3>${name}</h3>
+                <p>Joined: ${escapeHTML(formatDate(ref.referred_at))}</p>
+                <p>Bonus: ${escapeHTML(formatCherry(ref.bonus))} Cherry</p>
+                <span class="referral-status ${statusLabel}">
+                    ${statusLabel.toUpperCase()}
+                </span>
+            `;
+
+            container.appendChild(item);
+        });
+    }
+
+    async function processReferralStart() {
+        const params = new URLSearchParams(window.location.search);
+
+        const startParam =
+            tg?.initDataUnsafe?.start_param ||
+            params.get("startapp") ||
+            params.get("start") ||
+            params.get("tgWebAppStartParam");
 
         if (!startParam) return;
 
         try {
-
             await api(
-                "/api/referral/claim?start=" +
-                encodeURIComponent(startParam),
+                `/api/referral/claim?start=${encodeURIComponent(startParam)}`,
                 "POST"
             );
-
         } catch (error) {
-
-            console.log(
-                "Referral:",
-                error.message
-            );
-
+            console.warn("Referral attribution:", error.message);
         }
-
     }
 
+    const copyReferral = $("copyReferral");
 
-    /* =====================================
-       WITHDRAW PREVIEW
-       ===================================== */
+    if (copyReferral) {
+        copyReferral.addEventListener("click", async () => {
+            const input = $("referralLink");
 
-    function updateWithdrawPreview() {
+            if (!input || !input.value) {
+                showStatus("referralList", "Referral link not available.", true);
+                return;
+            }
 
-        const amountInput = $("withdrawAmount");
+            try {
+                await navigator.clipboard.writeText(input.value);
 
-        if (!amountInput) return;
+                showStatus("referralList", "Referral link copied!");
+            } catch (error) {
+                input.select();
 
-        const amount = Number(amountInput.value || 0);
+                const copied = document.execCommand("copy");
 
-        setText(
-            "withdrawUsd",
-            "$" + usdValue(amount)
-        );
-
-        setText(
-            "withdrawBalance",
-            formatNumber(userData?.balance || 0)
-        );
-
+                showStatus(
+                    "referralList",
+                    copied ? "Referral link copied!" : "Copy failed.",
+                    !copied
+                );
+            }
+        });
     }
 
+    // ==========================================
+    // WALLET
+    // ==========================================
 
-    $("withdrawAmount")?.addEventListener(
-        "input",
-        updateWithdrawPreview
-    );
+    async function saveWallet() {
+        const input = $("walletAddress");
 
+        if (!input) return;
 
-    /* =====================================
-       SAVE WALLET
-       ===================================== */
-
-    $("saveWallet")?.addEventListener("click", async () => {
-
-        const button = $("saveWallet");
-
-        const address = $("walletInput")?.value?.trim();
+        const address = input.value.trim();
 
         if (!address) {
-
-            message(
-                "walletMessage",
-                "Please enter your wallet address.",
-                "error"
-            );
-
+            showStatus("walletStatus", "Enter your wallet address.", true);
             return;
-
         }
-
-        button.disabled = true;
 
         try {
+            const data = await api("/api/wallet", "POST", {
+                address
+            });
 
-            await api(
-                "/api/wallet",
-                "POST",
-                {
-                    address
-                }
+            showStatus(
+                "walletStatus",
+                data.message || "Wallet address saved successfully!"
             );
 
-            message(
-                "walletMessage",
-                "Wallet saved successfully.",
-                "success"
-            );
-
-            await refreshUser();
+            createVerifyWalletButton();
 
         } catch (error) {
+            showStatus("walletStatus", error.message, true);
+        }
+    }
 
-            message(
-                "walletMessage",
-                error.message,
-                "error"
-            );
+    const saveWalletButton = $("saveWallet");
 
-        } finally {
+    if (saveWalletButton) {
+        saveWalletButton.addEventListener("click", saveWallet);
+    }
 
-            button.disabled = false;
+    function createVerifyWalletButton() {
+        if ($("verifyWallet")) return;
 
+        const saveButton = $("saveWallet");
+        if (!saveButton) return;
+
+        const button = document.createElement("button");
+
+        button.id = "verifyWallet";
+        button.className = "secondary";
+        button.type = "button";
+        button.textContent = "Verify Wallet";
+
+        saveButton.insertAdjacentElement("afterend", button);
+
+        button.addEventListener("click", verifyWallet);
+    }
+
+    async function verifyWallet() {
+        const input = $("walletAddress");
+
+        const address = input?.value.trim();
+
+        if (!address) {
+            showStatus("walletStatus", "Enter your wallet address first.", true);
+            return;
         }
 
-    });
-
-
-    /* =====================================
-       WALLET VERIFICATION
-       ===================================== */
-
-    $("verifyWallet")?.addEventListener("click", async () => {
+        if (!window.ethereum) {
+            showStatus(
+                "walletStatus",
+                "Please open this app in a wallet browser such as MetaMask.",
+                true
+            );
+            return;
+        }
 
         const button = $("verifyWallet");
 
-        const address = $("walletInput")?.value?.trim();
-
-        if (!address) {
-
-            message(
-                "walletMessage",
-                "Enter your wallet address first.",
-                "error"
-            );
-
-            return;
-
-        }
-
-        button.disabled = true;
+        if (button) button.disabled = true;
 
         try {
-
             const challenge = await api(
                 "/api/wallet/verification/challenge",
                 "POST",
+                { address }
+            );
+
+            if (!challenge.message) {
+                throw new Error("Wallet verification message not received.");
+            }
+
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+
+            const connectedAddress = accounts?.[0];
+
+            if (
+                !connectedAddress ||
+                connectedAddress.toLowerCase() !== address.toLowerCase()
+            ) {
+                throw new Error(
+                    "Connected wallet does not match the saved address."
+                );
+            }
+
+            const signature = await window.ethereum.request({
+                method: "personal_sign",
+                params: [challenge.message, connectedAddress]
+            });
+
+            const result = await api(
+                "/api/wallet/verification/confirm",
+                "POST",
                 {
-                    address
+                    address,
+                    message: challenge.message,
+                    signature
                 }
             );
 
-            setText(
-                "walletChallenge",
-                challenge.message
-            );
-
-            message(
-                "walletMessage",
-                "Sign the verification message in your wallet.",
-                "success"
+            showStatus(
+                "walletStatus",
+                result.message || "Wallet verified successfully!"
             );
 
         } catch (error) {
-
-            message(
-                "walletMessage",
-                error.message,
-                "error"
-            );
-
+            showStatus("walletStatus", error.message, true);
         } finally {
-
-            button.disabled = false;
-
+            if (button) button.disabled = false;
         }
-
-    });
-
-
-    /* =====================================
-       LOAD WITHDRAWALS
-       ===================================== */
-
-    async function loadWithdrawals() {
-
-        const container = $("withdrawalList");
-
-        if (!container) return;
-
-        try {
-
-            const data = await api("/api/withdrawals");
-
-            container.innerHTML = "";
-
-            (data.withdrawals || []).forEach(item => {
-
-                const row = document.createElement("div");
-
-                row.className = "task-item";
-
-                const details = document.createElement("div");
-
-                details.className = "task-details";
-
-                const title = document.createElement("h3");
-
-                title.textContent =
-                    formatNumber(item.amount) + " Cherry";
-
-                const description = document.createElement("p");
-
-                description.textContent =
-                    "BEP20 • " +
-                    String(item.status || "Pending").toUpperCase();
-
-                details.appendChild(title);
-
-                details.appendChild(description);
-
-                row.appendChild(details);
-
-                container.appendChild(row);
-
-            });
-
-        } catch (error) {
-
-            container.textContent = error.message;
-
-        }
-
     }
 
+    // ==========================================
+    // WITHDRAWAL
+    // ==========================================
 
-    /* =====================================
-       CREATE WITHDRAWAL
-       ===================================== */
+    const withdrawButton = $("withdrawButton");
 
-    $("withdrawButton")?.addEventListener("click", async () => {
+    if (withdrawButton) {
+        withdrawButton.addEventListener("click", async () => {
+            const amount = Number($("withdrawAmount")?.value);
 
-        const button = $("withdrawButton");
+            const walletAddress = $("walletAddress")?.value.trim();
 
-        const amount = Number(
-            $("withdrawAmount")?.value || 0
-        );
+            if (!amount || amount <= 0) {
+                showStatus("withdrawStatus", "Enter a valid amount.", true);
+                return;
+            }
 
-        const walletAddress = (
-            $("walletInput")?.value ||
-            userData?.wallet_address ||
-            ""
-        ).trim();
+            if (amount < 10000) {
+                showStatus(
+                    "withdrawStatus",
+                    "Minimum withdrawal is 10,000 Cherry.",
+                    true
+                );
+                return;
+            }
 
-        if (!amount || amount < MIN_WITHDRAW) {
+            if (!walletAddress) {
+                showStatus(
+                    "withdrawStatus",
+                    "Save your wallet address first.",
+                    true
+                );
+                return;
+            }
 
-            message(
-                "withdrawMessage",
-                "Minimum withdrawal is 10,000 Cherry.",
-                "error"
-            );
+            withdrawButton.disabled = true;
 
-            return;
-
-        }
-
-        if (!walletAddress) {
-
-            message(
-                "withdrawMessage",
-                "Please save your wallet address first.",
-                "error"
-            );
-
-            return;
-
-        }
-
-        button.disabled = true;
-
-        try {
-
-            const data = await api(
-                "/api/withdraw",
-                "POST",
-                {
+            try {
+                const data = await api("/api/withdraw", "POST", {
                     amount,
                     wallet_address: walletAddress,
                     network: "BEP20"
-                }
-            );
+                });
 
-            message(
-                "withdrawMessage",
-                "Withdrawal request submitted successfully.",
-                "success"
-            );
-
-            await refreshUser();
-
-            await loadWithdrawals();
-
-        } catch (error) {
-
-            message(
-                "withdrawMessage",
-                error.message,
-                "error"
-            );
-
-        } finally {
-
-            button.disabled = false;
-
-        }
-
-    });
-
-
-    /* =====================================
-       PROFILE
-       ===================================== */
-
-    async function loadProfile() {
-
-        try {
-
-            const data = await api("/api/me");
-
-            setText(
-                "profileName",
-                data.full_name || "Telegram User"
-            );
-
-            setText(
-                "telegramId",
-                data.telegram_id || telegramUser?.id || "--"
-            );
-
-            setText(
-                "profileReferrals",
-                formatNumber(data.referral_count)
-            );
-
-            setText(
-                "profileVerifyStatus",
-                data.verified ? "Verified" : "Not Verified"
-            );
-
-            if (data.wallet_address) {
-
-                setValue(
-                    "profileWallet",
-                    data.wallet_address
+                showStatus(
+                    "withdrawStatus",
+                    data.message || "Withdrawal request submitted!"
                 );
 
+                if ($("withdrawAmount")) {
+                    $("withdrawAmount").value = "";
+                }
+
+                await refreshAll();
+                await loadWithdrawals();
+
+            } catch (error) {
+                showStatus("withdrawStatus", error.message, true);
+            } finally {
+                withdrawButton.disabled = false;
             }
-
-        } catch (error) {
-
-            message(
-                "walletMessage",
-                error.message,
-                "error"
-            );
-
-        }
-
+        });
     }
 
+    // ==========================================
+    // WITHDRAWAL HISTORY
+    // ==========================================
 
-    /* =====================================
-       INITIALIZATION
-       ===================================== */
+    async function loadWithdrawals() {
+        const container = $("withdrawalHistory");
+
+        if (!container) return;
+
+        container.innerHTML =
+            '<div class="empty-state">Loading withdrawal history...</div>';
+
+        try {
+            const data = await api("/api/withdrawals");
+
+            state.withdrawals = Array.isArray(data)
+                ? data
+                : (data.withdrawals || []);
+
+            if (!state.withdrawals.length) {
+                container.innerHTML =
+                    '<div class="empty-state">No withdrawal history yet.</div>';
+                return;
+            }
+
+            container.innerHTML = "";
+
+            state.withdrawals.forEach(item => {
+                const card = document.createElement("div");
+
+                card.className = "history-item";
+
+                card.innerHTML = `
+                    <p><strong>Amount:</strong>
+                        ${escapeHTML(formatCherry(item.amount))} Cherry
+                    </p>
+                    <p><strong>Status:</strong>
+                        ${escapeHTML(item.status || "Pending")}
+                    </p>
+                    <p><strong>Network:</strong>
+                        ${escapeHTML(item.network || "BEP20")}
+                    </p>
+                    <p><strong>Date:</strong>
+                        ${escapeHTML(formatDate(item.created_at))}
+                    </p>
+                `;
+
+                container.appendChild(card);
+            });
+
+        } catch (error) {
+            container.innerHTML = "";
+            showStatus("withdrawalHistory", error.message, true);
+        }
+    }
+
+    // ==========================================
+    // MAIN REFRESH
+    // ==========================================
+
+    async function refreshAll() {
+        try {
+            const data = await api("/api/me");
+
+            updateBalance(data);
+
+            setText("refCount", data.referral_count ?? 0);
+
+            if (data.referral_link) {
+                const input = $("referralLink");
+
+                if (input) {
+                    input.value = data.referral_link;
+                }
+            }
+
+            if (data.wallet_address && $("walletAddress")) {
+                $("walletAddress").value = data.wallet_address;
+                createVerifyWalletButton();
+            }
+
+            renderMining(data);
+
+            await checkChannel();
+
+            if (state.joined) {
+                await loadMining();
+            }
+
+            await updateDailyStatus();
+
+        } catch (error) {
+            console.error("Refresh failed:", error);
+
+            showStatus(
+                "miningStatus",
+                error.message,
+                true
+            );
+        }
+    }
+
+    // ==========================================
+    // INITIALIZE APP
+    // ==========================================
 
     async function initialize() {
-
         loadTelegramUser();
 
         showPage("homePage");
 
-        await refreshUser();
+        await processReferralStart();
 
-        await claimReferral();
+        await refreshAll();
 
+        await loadTasks();
+        await loadReferrals();
+        await loadWithdrawals();
+
+        console.log("Cherry Mining App initialized.");
     }
 
     initialize();
+
+    // Refresh server data periodically
+    setInterval(async () => {
+        await refreshAll();
+    }, 30000);
 
 })();
