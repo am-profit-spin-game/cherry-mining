@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="bn"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#100b18"><title>Cherry Mining</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="//libtl.com/sdk.js" data-zone="12152538" data-sdk="show_12152538"></script>
+<link rel="stylesheet" href="./style.css"></head><body>
+<header class="topbar"><b>🍒 Cherry Mining</b><span id="userName">Telegram User</span></header>
+<main class="container">
+<section class="balance"><p>মোট Cherry Balance</p><h1><span id="balance">0</span> 🍒</h1><small>ডেমো পয়েন্ট — নগদ অর্থ বা ক্রিপ্টো নয়</small></section>
+<section class="card center"><h2>⛏️ Mining Center</h2><div class="cherry">🍒</div><p>ডেমো রেট: 500 Cherry / দিন</p><button id="startMining" class="primary">START MINING</button><button id="claimMining" class="secondary">CLAIM MINING</button><p id="miningStatus" class="status">Mining শুরু হয়নি</p></section>
+<section class="card center"><h2>🎁 Daily Check-in</h2><p>দৈনিক ডেমো বোনাস: 100 Cherry</p><button id="dailyBonus" class="primary">DAILY CHECK-IN</button><p id="dailyStatus" class="status"></p></section>
+<section class="card center"><h2>📺 Monetag Watch Ad</h2><p>বিজ্ঞাপন দেখানোর সুবিধা SDK ও নেটওয়ার্কের অনুমতির ওপর নির্ভর করে।</p><button id="watchAd" class="primary">WATCH AD</button><p id="adStatus" class="status">রিওয়ার্ডের জন্য সার্ভার-ভেরিফিকেশন প্রয়োজন।</p></section>
+<section class="card" id="tasks"><h2>📋 Tasks</h2>
+<div class="task"><span>Join Telegram Community</span><b>100 🍒</b></div><div class="task"><span>Read App Rules</span><b>50 🍒</b></div><div class="task"><span>Complete Profile</span><b>50 🍒</b></div><div class="task"><span>Explore Cherry Mining</span><b>50 🍒</b></div><div class="task"><span>Daily Check-in</span><b>100 🍒</b></div><div class="task"><span>Watch Monetag Ad</span><b>Verification required</b></div><div class="task"><span>Invite a Friend</span><b>1,000 🍒</b></div><div class="task"><span>Community Updates</span><b>50 🍒</b></div><div class="task"><span>Visit Project Page</span><b>50 🍒</b></div><div class="task"><span>Mining Activity</span><b>50 🍒</b></div></section>
+<section class="card" id="referral"><h2>👥 Referral</h2><p>আপনার Telegram referral link</p><input id="referralLink" readonly value="লোড হচ্ছে..."><button id="copyReferral" class="secondary">COPY LINK</button><p>Referral count: <b id="refCount">0</b></p></section>
+<section class="card"><h2>💰 Wallet (Demo)</h2><p>Minimum display threshold: 10,000 Cherry</p><p>এই সংস্করণে বাস্তব উত্তোলন বা ক্রিপ্টো লেনদেন নেই।</p><button disabled class="secondary">WITHDRAW — DISABLED</button></section>
+</main><nav class="bottom"><a href="#">Home</a><a href="#tasks">Tasks</a><a href="#referral">Referral</a></nav><script src="./app.js"></script></body></html>
