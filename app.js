@@ -303,14 +303,10 @@
         );
 
         const reward = Number(data.mining_reward || 500);
-
         const earned = state.miningBaseEarned;
 
         setText("miningEarned", formatCherry(earned));
-        setText(
-            "miningUsd",
-            formatUSD(data.mining_earned_usd)
-        );
+        setText("miningUsd", formatUSD(data.mining_earned_usd));
 
         const progress = Math.min(
             100,
@@ -323,10 +319,7 @@
             progressBar.style.width = progress + "%";
         }
 
-        setText(
-            "miningProgressText",
-            progress.toFixed(2) + "%"
-        );
+        setText("miningProgressText", progress.toFixed(2) + "%");
 
         const startButton = $("startMining");
         const claimButton = $("claimMining");
@@ -396,10 +389,7 @@
                     state.mining?.cherry_per_usd || 10000
                 );
 
-                setText(
-                    "miningUsd",
-                    formatUSD(liveEarned / usdRate)
-                );
+                setText("miningUsd", formatUSD(liveEarned / usdRate));
 
                 const totalDuration = started
                     ? endTime - new Date(started).getTime()
@@ -420,10 +410,8 @@
 
                 if (bar) bar.style.width = progress + "%";
 
-                setText(
-                    "miningProgressText",
-                    progress.toFixed(2) + "%"
-                );
+                setText("miningProgressText", progress.toFixed(2) + "%");
+
             } else {
                 setText(
                     "miningTimer",
@@ -454,11 +442,7 @@
     if (startMining) {
         startMining.addEventListener("click", async () => {
             if (!state.joined) {
-                showStatus(
-                    "miningStatus",
-                    "Join the official channel first.",
-                    true
-                );
+                showStatus("miningStatus", "Join the official channel first.", true);
                 return;
             }
 
@@ -544,10 +528,7 @@
             try {
                 const data = await api("/api/daily/claim", "POST");
 
-                showStatus(
-                    "dailyStatus",
-                    data.message || "Daily bonus claimed!"
-                );
+                showStatus("dailyStatus", data.message || "Daily bonus claimed!");
 
                 await refreshAll();
             } catch (error) {
@@ -558,15 +539,14 @@
     }
 
     // ==========================================
-    // MONETAG TASKS
+    // TASKS
     // ==========================================
 
     async function loadTasks() {
         const container = $("taskList");
         if (!container) return;
 
-        container.innerHTML =
-            '<div class="empty-state">Loading tasks...</div>';
+        container.innerHTML = '<div class="empty-state">Loading tasks...</div>';
 
         try {
             const data = await api("/api/tasks");
@@ -576,8 +556,7 @@
                 : (data.tasks || []);
 
             if (!state.tasks.length) {
-                container.innerHTML =
-                    '<div class="empty-state">No tasks available.</div>';
+                container.innerHTML = '<div class="empty-state">No tasks available.</div>';
                 return;
             }
 
@@ -585,30 +564,23 @@
 
             state.tasks.forEach(task => {
                 const item = document.createElement("div");
-
                 item.className = "task-item";
 
-                const title = escapeHTML(
-                    task.title || `Task ${task.id}`
-                );
-
+                const title = escapeHTML(task.title || `Task ${task.id}`);
                 const description = escapeHTML(
                     task.description || "Complete this task to earn Cherry."
                 );
-
                 const reward = escapeHTML(task.reward ?? 50);
 
-                const completed = Boolean(
-                    task.completed || task.claimed
-                );
+                const completed = Boolean(task.completed || task.claimed);
 
                 item.innerHTML = `
                     <h3>${title}</h3>
                     <p>${description}</p>
                     <p>Reward: ${reward} Cherry</p>
                     <button class="primary task-action"
-                        ${completed ? "disabled" : ""}
-                        type="button">
+                    ${completed ? "disabled" : ""}
+                    type="button">
                         ${completed ? "Completed" : "Start Task"}
                     </button>
                     <p class="status task-status"></p>
@@ -653,26 +625,19 @@
             }
 
             if (typeof window.show_12152538 !== "function") {
-                throw new Error(
-                    "Monetag SDK is not ready. Please reload and try again."
-                );
+                throw new Error("Monetag SDK is not ready. Please reload and try again.");
             }
 
             status.textContent = "Please watch the advertisement.";
-
             button.textContent = "Advertisement Running...";
 
             try {
-                await window.show_12152538({
-                    ymid: session.ymid
-                });
+                await window.show_12152538({ ymid: session.ymid });
             } catch (adError) {
                 console.warn("Monetag SDK:", adError);
             }
 
-            status.textContent =
-                "Waiting for ad verification. Please wait...";
-
+            status.textContent = "Waiting for ad verification. Please wait...";
             button.textContent = "Verifying...";
 
             let verified = false;
@@ -689,37 +654,30 @@
                     break;
                 }
 
-                if (
-                    result.status === "rejected" ||
-                    result.status === "non_valued"
-                ) {
-                    throw new Error(
-                        "Advertisement was not approved. Try again later."
-                    );
+                if (result.status === "rejected" || result.status === "non_valued") {
+                    throw new Error("Advertisement was not approved. Try again later.");
                 }
             }
 
             if (!verified) {
-                throw new Error(
-                    "Ad verification is still pending. Please try again later."
-                );
+                throw new Error("Ad verification is still pending. Please try again later.");
             }
 
             const completed = await api(
                 `/api/tasks/${encodeURIComponent(task.id)}/complete`,
                 "POST",
-                {
-                    session_id: session.session_id
-                }
+                { session_id: session.session_id }
             );
 
-            status.textContent =
-                completed.message || "Task completed successfully!";
-
+            status.textContent = completed.message || "Task completed successfully!";
             button.textContent = "Completed";
 
-            await refreshAll();
-            await loadTasks();
+            // Refresh balance, tasks and referral data after task completion
+            await Promise.all([
+                refreshAll(),
+                loadTasks(),
+                loadReferrals()
+            ]);
 
         } catch (error) {
             status.textContent = error.message;
@@ -755,18 +713,25 @@
         try {
             const data = await api("/api/referrals");
 
-            state.referrals = data.referrals || [];
+            state.referrals = Array.isArray(data.referrals)
+                ? data.referrals
+                : [];
 
-            setText("refCount", data.total_referrals ?? data.referral_count ?? 0);
+            // Backend main.py returns total, approved, pending, expired
+            setText(
+                "refCount",
+                data.total ?? data.total_referrals ??
+                data.referral_count ?? state.referrals.length
+            );
 
             setText(
                 "approvedReferrals",
-                data.approved_referrals ?? data.approved ?? 0
+                data.approved ?? data.approved_referrals ?? 0
             );
 
             setText(
                 "pendingReferrals",
-                data.pending_referrals ?? data.pending ?? 0
+                data.pending ?? data.pending_referrals ?? 0
             );
 
             setText(
@@ -786,8 +751,7 @@
         if (!container) return;
 
         if (!referrals.length) {
-            container.innerHTML =
-                '<div class="empty-state">No referrals yet.</div>';
+            container.innerHTML = '<div class="empty-state">No referrals yet.</div>';
             return;
         }
 
@@ -795,7 +759,6 @@
 
         referrals.forEach(ref => {
             const item = document.createElement("div");
-
             item.className = "referral-item";
 
             const name = escapeHTML(
@@ -803,7 +766,6 @@
             );
 
             const status = String(ref.status || "pending").toLowerCase();
-
             const statusLabel = escapeHTML(status);
 
             item.innerHTML = `
@@ -835,6 +797,10 @@
                 `/api/referral/claim?start=${encodeURIComponent(startParam)}`,
                 "POST"
             );
+
+            // Refresh referral information after attribution
+            await loadReferrals();
+
         } catch (error) {
             console.warn("Referral attribution:", error.message);
         }
@@ -853,8 +819,8 @@
 
             try {
                 await navigator.clipboard.writeText(input.value);
-
                 showStatus("referralList", "Referral link copied!");
+
             } catch (error) {
                 input.select();
 
@@ -875,7 +841,6 @@
 
     async function saveWallet() {
         const input = $("walletAddress");
-
         if (!input) return;
 
         const address = input.value.trim();
@@ -886,9 +851,7 @@
         }
 
         try {
-            const data = await api("/api/wallet", "POST", {
-                address
-            });
+            const data = await api("/api/wallet", "POST", { address });
 
             showStatus(
                 "walletStatus",
@@ -922,13 +885,11 @@
         button.textContent = "Verify Wallet";
 
         saveButton.insertAdjacentElement("afterend", button);
-
         button.addEventListener("click", verifyWallet);
     }
 
     async function verifyWallet() {
         const input = $("walletAddress");
-
         const address = input?.value.trim();
 
         if (!address) {
@@ -946,7 +907,6 @@
         }
 
         const button = $("verifyWallet");
-
         if (button) button.disabled = true;
 
         try {
@@ -970,9 +930,7 @@
                 !connectedAddress ||
                 connectedAddress.toLowerCase() !== address.toLowerCase()
             ) {
-                throw new Error(
-                    "Connected wallet does not match the saved address."
-                );
+                throw new Error("Connected wallet does not match the saved address.");
             }
 
             const signature = await window.ethereum.request({
@@ -983,11 +941,7 @@
             const result = await api(
                 "/api/wallet/verification/confirm",
                 "POST",
-                {
-                    address,
-                    message: challenge.message,
-                    signature
-                }
+                { address, message: challenge.message, signature }
             );
 
             showStatus(
@@ -1011,7 +965,6 @@
     if (withdrawButton) {
         withdrawButton.addEventListener("click", async () => {
             const amount = Number($("withdrawAmount")?.value);
-
             const walletAddress = $("walletAddress")?.value.trim();
 
             if (!amount || amount <= 0) {
@@ -1020,20 +973,12 @@
             }
 
             if (amount < 10000) {
-                showStatus(
-                    "withdrawStatus",
-                    "Minimum withdrawal is 10,000 Cherry.",
-                    true
-                );
+                showStatus("withdrawStatus", "Minimum withdrawal is 10,000 Cherry.", true);
                 return;
             }
 
             if (!walletAddress) {
-                showStatus(
-                    "withdrawStatus",
-                    "Save your wallet address first.",
-                    true
-                );
+                showStatus("withdrawStatus", "Save your wallet address first.", true);
                 return;
             }
 
@@ -1072,11 +1017,9 @@
 
     async function loadWithdrawals() {
         const container = $("withdrawalHistory");
-
         if (!container) return;
 
-        container.innerHTML =
-            '<div class="empty-state">Loading withdrawal history...</div>';
+        container.innerHTML = '<div class="empty-state">Loading withdrawal history...</div>';
 
         try {
             const data = await api("/api/withdrawals");
@@ -1086,8 +1029,7 @@
                 : (data.withdrawals || []);
 
             if (!state.withdrawals.length) {
-                container.innerHTML =
-                    '<div class="empty-state">No withdrawal history yet.</div>';
+                container.innerHTML = '<div class="empty-state">No withdrawal history yet.</div>';
                 return;
             }
 
@@ -1095,7 +1037,6 @@
 
             state.withdrawals.forEach(item => {
                 const card = document.createElement("div");
-
                 card.className = "history-item";
 
                 card.innerHTML = `
@@ -1132,14 +1073,12 @@
 
             updateBalance(data);
 
+            // /api/me provides approved referral count
             setText("refCount", data.referral_count ?? 0);
 
             if (data.referral_link) {
                 const input = $("referralLink");
-
-                if (input) {
-                    input.value = data.referral_link;
-                }
+                if (input) input.value = data.referral_link;
             }
 
             if (data.wallet_address && $("walletAddress")) {
@@ -1157,14 +1096,13 @@
 
             await updateDailyStatus();
 
+            // Refresh referral stats with authoritative referral API
+            await loadReferrals();
+
         } catch (error) {
             console.error("Refresh failed:", error);
 
-            showStatus(
-                "miningStatus",
-                error.message,
-                true
-            );
+            showStatus("miningStatus", error.message, true);
         }
     }
 
