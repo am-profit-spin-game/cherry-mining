@@ -54,6 +54,7 @@ CHERRY_PER_USD = Decimal("10000")
 DAILY_REWARD = Decimal("100")
 
 MINING_HOURS = 24
+
 REFERRAL_TASK_LIMIT = 10
 REFERRAL_DEADLINE_HOURS = 24
 
@@ -114,7 +115,6 @@ def init_db():
         )
     """)
 
-    # Existing database migrations
     cur.execute("""
         ALTER TABLE users
         ALTER COLUMN balance TYPE NUMERIC(20,8)
@@ -212,6 +212,11 @@ def init_db():
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_users_referrer
         ON users(referred_by)
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_task_claims_referral_window
+        ON task_claims(telegram_id, claimed_at)
     """)
 
     conn.commit()
@@ -719,7 +724,7 @@ def me(
 
 
 # ==================================================
-# REFERRAL SYSTEM
+# REFERRAL SYSTEM (PATCH NEEDED)
 # ==================================================
 
 @app.post("/api/referral/claim")
@@ -842,7 +847,6 @@ def process_referral_reward(cur, telegram_id, now):
     if total < REFERRAL_TASK_LIMIT:
         return False
 
-    # Mark referred account as rewarded only once
     cur.execute("""
         UPDATE users
         SET referral_rewarded = TRUE
@@ -997,7 +1001,6 @@ def mining_start(
 ):
     user = current_user(x_telegram_init_data)
 
-    # Channel membership is mandatory
     require_channel(user["telegram_id"])
 
     now = datetime.now(timezone.utc)
@@ -1026,7 +1029,6 @@ def mining_start(
                 "Mining is already running"
             )
 
-        # Do not discard unclaimed Cherry from a previous cycle
         remaining = mining_amount(row, now)
 
         if remaining > 0:
@@ -1071,7 +1073,6 @@ def mining_claim(
 ):
     user = current_user(x_telegram_init_data)
 
-    # Channel membership is mandatory
     require_channel(user["telegram_id"])
 
     now = datetime.now(timezone.utc)
@@ -1104,7 +1105,6 @@ def mining_claim(
 
         raise HTTPException(400, "No Cherry available to claim")
 
-    # Add only the amount earned since the last claim
     cur.execute("""
         UPDATE users
         SET balance = balance + %s,
@@ -1116,8 +1116,6 @@ def mining_claim(
         user["telegram_id"]
     ))
 
-    # When the cycle has ended and all reward has been claimed,
-    # clear the cycle so a new one can start.
     if now >= row["mining_ends"]:
         cur.execute("""
             UPDATE users
@@ -2015,3 +2013,4 @@ def reject_withdrawal(
 # ==================================================
 # END
 # ==================================================
+
